@@ -1,28 +1,33 @@
 #!/usr/bin/env node
 /**
- * Grant or revoke environment access via Firebase Auth custom claim allowlist
- * (default claim key: allowedEnvs).
+ * firebase-multi-env CLI
  *
- * Usage:
  *   npx firebase-multi-env grant-env qual you@example.com
  *   npx firebase-multi-env grant-env qual --revoke you@example.com
- *   npx firebase-multi-env grant-env cert --claim allowedEnvs --project my-project you@example.com
+ *   npx firebase-multi-env init
  *
- * Requires Application Default Credentials with permission to set Auth claims:
+ * grant-env requires Application Default Credentials:
  *   gcloud auth application-default login
  */
 
 import { createRequire } from 'node:module';
-import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { copyFileSync, mkdirSync, existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const packageRoot = join(__dirname, '..');
+const templatesDir = join(packageRoot, 'templates');
 
 function printHelp() {
   console.log(`Usage:
   firebase-multi-env grant-env <env> [--revoke] [--claim allowedEnvs] [--project <id>] <email>
+  firebase-multi-env init [--dir <path>]
 
 Examples:
   firebase-multi-env grant-env qual you@example.com
   firebase-multi-env grant-env cert --revoke you@example.com
+  firebase-multi-env init
 `);
 }
 
@@ -117,6 +122,39 @@ async function grantEnv(args) {
   }
 }
 
+function initProject(args) {
+  const dirIdx = args.indexOf('--dir');
+  const targetRoot = dirIdx >= 0 ? args[dirIdx + 1] : process.cwd();
+  if (!targetRoot) {
+    console.error('Missing path after --dir');
+    process.exit(1);
+  }
+
+  const snippetsDir = join(targetRoot, 'firestore.rules.snippets');
+  mkdirSync(snippetsDir, { recursive: true });
+
+  const files = [
+    'firestore.gated.rules.snippet',
+    'firestore.public.rules.snippet',
+    'MULTI_ENV_SETUP.md',
+  ];
+
+  for (const file of files) {
+    const from = join(templatesDir, file);
+    const to = file === 'MULTI_ENV_SETUP.md'
+      ? join(targetRoot, 'MULTI_ENV_SETUP.md')
+      : join(snippetsDir, file);
+
+    if (!existsSync(from)) {
+      throw new Error(`Missing template: ${from}`);
+    }
+    copyFileSync(from, to);
+    console.log(`Wrote ${to}`);
+  }
+
+  console.log('\nDone. See MULTI_ENV_SETUP.md for next steps.');
+}
+
 const [command, ...rest] = process.argv.slice(2);
 
 if (!command || command === '--help' || command === '-h') {
@@ -130,6 +168,13 @@ if (command === 'grant-env') {
   } catch (error) {
     console.error('Failed to update environment access claim.', error);
     console.error('Tip: gcloud auth application-default login');
+    process.exit(1);
+  }
+} else if (command === 'init') {
+  try {
+    initProject(rest);
+  } catch (error) {
+    console.error('Failed to initialize multi-env files.', error);
     process.exit(1);
   }
 } else {

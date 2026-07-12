@@ -1,5 +1,5 @@
 import { httpsCallable, type Functions, type HttpsCallableResult } from 'firebase/functions';
-import type { AppEnvironment } from './types.js';
+import type { AppEnvironment } from '../core/types.js';
 
 export type CreateCallableOptions = {
   /**

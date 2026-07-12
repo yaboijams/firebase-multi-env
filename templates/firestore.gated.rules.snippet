@@ -1,0 +1,27 @@
+// Gated environment Firestore rules helpers.
+// Use on non-public databases (qual, cert, staging, etc.).
+// Replace 'qual' with your environment name where needed.
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function hasEnvAccess(env) {
+      return isSignedIn()
+        && request.auth.token.allowedEnvs is list
+        && env in request.auth.token.allowedEnvs;
+    }
+
+    function isOwner(userId) {
+      return hasEnvAccess('qual') && request.auth.uid == userId;
+    }
+
+    // Example: users/{userId}
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+    }
+  }
+}

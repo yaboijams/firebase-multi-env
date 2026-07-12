@@ -1,6 +1,6 @@
 import { getApp } from 'firebase-admin/app';
 import { getFirestore, type Firestore } from 'firebase-admin/firestore';
-import type { EnvRuntime } from './runtimeEnv.js';
+import type { EnvRuntime } from '../core/runtime.js';
 
 /**
  * Create a getDb() bound to an EnvRuntime.

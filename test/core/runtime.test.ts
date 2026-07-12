@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { HttpsError } from 'firebase-functions/v1/https';
-import { createEnvRuntime } from '../src/runtimeEnv.js';
-import { authContext, multiEnvConfig } from './helpers.js';
+import { createEnvRuntime } from '../../src/core/runtime.js';
+import { authContext, multiEnvConfig } from '../helpers.js';
 
 describe('createEnvRuntime', () => {
   afterEach(() => {

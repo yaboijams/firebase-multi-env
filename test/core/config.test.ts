@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { normalizeEnvConfig } from '../src/config.js';
-import { multiEnvConfig } from './helpers.js';
+import { normalizeEnvConfig } from '../../src/core/config.js';
+import { multiEnvConfig } from '../helpers.js';
 
 describe('normalizeEnvConfig', () => {
   afterEach(() => {

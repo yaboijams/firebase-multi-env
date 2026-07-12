@@ -4,23 +4,41 @@ Secure **multi-environment** support for Firebase apps.
 
 One Firebase project, multiple Firestore databases, multiple Hosting sites — with Origin binding and an Auth allowlist claim so **production users never need special rights**.
 
-## Local development (npm link)
+## Package layout
 
-```bash
-cd /path/to/firebase-multi-env
-npm run build
-npm link
-
-cd /path/to/your-app
-npm link firebase-multi-env
+```text
+src/
+  core/        # types, config normalization, env runtime
+  server/      # getDb, auth guards
+  functions/   # callable v1/v2 + HTTP wrappers
+  client/      # callable, client Firestore, multi-env client kit
+templates/     # Firestore rules snippets + setup stub
+bin/           # grant-env + init CLI
 ```
 
-Rebuild this package after source changes; consumers pick up `dist/` via the link.
+Public imports:
 
-Peer dependencies (install what you use):
+| Import | Purpose |
+|---|---|
+| `firebase-multi-env/server` | `createEnvRuntime`, `createGetDb`, guards |
+| `firebase-multi-env/functions-v1` | callable wrapper (v1) |
+| `firebase-multi-env/functions-v2` | callable wrapper (v2) |
+| `firebase-multi-env/http` | `onRequest` / Express-style wrapper |
+| `firebase-multi-env/client` | callable + client Firestore kit |
+
+## Install
 
 ```bash
+npm install firebase-multi-env
 npm install firebase firebase-admin firebase-functions
+```
+
+Local link:
+
+```bash
+npm run build && npm link
+# in your app
+npm link firebase-multi-env
 ```
 
 ## Security model
@@ -28,20 +46,28 @@ npm install firebase firebase-admin firebase-functions
 | Request from | Database | Needs `allowedEnvs`? |
 |---|---|---|
 | Public env Hosting origin (e.g. prod) | that env's DB | **No** |
-| Gated env Hosting origin (e.g. qual/cert) | that env's DB | **Yes** (claim must include the env name) |
+| Gated env Hosting origin (e.g. qual/cert) | that env's DB | **Yes** |
 | Localhost → cloud gated env | gated DB | **Yes** |
 | Full local emulators | emulator default DB | **No** (optional) |
 
-Client `appEnv` is only a **hint** on localhost. Hosted Origin always wins (gated origins cannot spoof production).
+Client `appEnv` is only a **hint** on localhost. Hosted Origin always wins.
+
+## Quick start scaffolding
+
+```bash
+npx firebase-multi-env init
+```
+
+Writes:
+
+- `firestore.rules.snippets/` (gated + public templates)
+- `MULTI_ENV_SETUP.md`
 
 ## One-time Firebase setup
 
 ```bash
-# Extra Firestore databases
 firebase firestore:databases:create qual-env --location nam5
 firebase firestore:databases:create cert-env --location nam5
-
-# Extra Hosting sites
 firebase hosting:sites:create myapp-qual
 firebase hosting:sites:create myapp-cert
 firebase target:apply hosting qual myapp-qual
@@ -49,7 +75,7 @@ firebase target:apply hosting cert myapp-cert
 firebase target:apply hosting prod myapp
 ```
 
-Example `firebase.json` hosting + firestore entries:
+Example `firebase.json`:
 
 ```json
 {
@@ -66,51 +92,33 @@ Example `firebase.json` hosting + firestore entries:
 }
 ```
 
-### Gated-env rules snippet
+Rules templates ship in `templates/` (and via `init`). Gated DBs must check `allowedEnvs`; prod should not.
 
-Require the allowlist claim on gated databases only (prod rules stay owner-only):
-
-```
-function hasEnvAccess(env) {
-  return request.auth != null
-    && request.auth.token.allowedEnvs is list
-    && env in request.auth.token.allowedEnvs;
-}
-function isOwner(userId) {
-  return hasEnvAccess('qual') && request.auth.uid == userId;
-}
-```
-
-## Cloud Functions
+## Cloud Functions (callables)
 
 ```ts
-import { createEnvRuntime, createGetDb } from 'firebase-multi-env/server';
+import {
+  createEnvRuntime,
+  createGetDb,
+  requireAuth,
+  requireOwner,
+} from 'firebase-multi-env/server';
 import { createWithAppEnvV1 } from 'firebase-multi-env/functions-v1';
-// or: import { createWithAppEnvV2 } from 'firebase-multi-env/functions-v2';
 
 export const appEnvRuntime = createEnvRuntime({
   environments: {
     production: {
       database: '(default)',
-      origins: [
-        'https://myapp.web.app',
-        'https://myapp.firebaseapp.com',
-      ],
+      origins: ['https://myapp.web.app', 'https://myapp.firebaseapp.com'],
     },
     qual: {
       database: 'qual-env',
-      origins: [
-        'https://myapp-qual.web.app',
-        'https://myapp-qual.firebaseapp.com',
-      ],
+      origins: ['https://myapp-qual.web.app'],
       requireClaim: true,
     },
     cert: {
       database: 'cert-env',
-      origins: [
-        'https://myapp-cert.web.app',
-        'https://myapp-cert.firebaseapp.com',
-      ],
+      origins: ['https://myapp-cert.web.app'],
       requireClaim: true,
     },
   },
@@ -119,35 +127,55 @@ export const appEnvRuntime = createEnvRuntime({
 export const getDb = createGetDb(appEnvRuntime);
 export const withAppEnv = createWithAppEnvV1(appEnvRuntime);
 
-// v1
 export const syncData = functions.https.onCall(withAppEnv(async (data, context) => {
+  const auth = requireAuth(context.auth);
+  requireOwner(auth, data.userId);
   const db = getDb();
   // ...
 }));
-
-// v2
-// import { onCall } from 'firebase-functions/v2/https';
-// const withAppEnvV2 = createWithAppEnvV2(appEnvRuntime);
-// export const syncData = onCall(withAppEnvV2(async (request) => { ... }));
 ```
 
-Add or change domains anytime by updating an environment's `origins` list. Optional process env overrides: `HOST_ORIGINS_<ENV>` (comma-separated), e.g. `HOST_ORIGINS_QUAL`.
+Optional overrides: `HOST_ORIGINS_<ENV>` (comma-separated).
+
+## HTTP functions
+
+```ts
+import { createWithAppEnvHttp } from 'firebase-multi-env/http';
+import { onRequest } from 'firebase-functions/v2/https';
+
+const withHttp = createWithAppEnvHttp(appEnvRuntime);
+
+export const api = onRequest(withHttp(async (req, res) => {
+  const db = getDb();
+  res.json({ env: appEnvRuntime.getEnvTag() });
+}));
+```
+
+Localhost hints: `x-app-env` header or `?appEnv=`.
 
 ## Web client
 
-Pass any configured env name into `createCallable`. How you load it is up to you (Vite, Next, hardcode, etc.):
-
 ```ts
-import { createCallable } from 'firebase-multi-env/client';
+import { createMultiEnvClient } from 'firebase-multi-env/client';
 import { getFunctions } from 'firebase/functions';
 
-const appEnv = import.meta.env.VITE_APP_ENV; // e.g. 'production' | 'qual' | 'cert'
-const callable = createCallable(getFunctions(app), { appEnv });
+const appEnv = import.meta.env.VITE_APP_ENV;
+const { callable, getDb } = createMultiEnvClient({
+  app,
+  functions: getFunctions(app),
+  appEnv,
+  databases: {
+    production: '(default)',
+    qual: 'qual-env',
+    cert: 'cert-env',
+  },
+});
 
 await callable('syncData')({ /* payload */ });
+const db = getDb();
 ```
 
-Use `getFirestore(app)` for `(default)` and `getFirestore(app, 'qual-env')` / `getFirestore(app, 'cert-env')` for gated DBs. With emulators, keep the default DB.
+Or use `createCallable` / `createGetClientFirestore` individually.
 
 ## Grant environment access
 
@@ -156,54 +184,29 @@ gcloud auth application-default login
 npx firebase-multi-env grant-env qual --project my-project you@email.com
 npx firebase-multi-env grant-env cert --project my-project you@email.com
 # → { allowedEnvs: ['qual', 'cert'] }
-# sign out and sign in again
+# sign out / sign in
 
 npx firebase-multi-env grant-env qual --revoke --project my-project you@email.com
 ```
 
+## What this package covers
+
+- Origin → environment → Firestore database routing
+- Gated-env allowlist claims for Functions (callable + HTTP)
+- Client callable + Firestore helpers
+- Server guards (`requireAuth`, `requireOwner`, `requireClaim`)
+- Rules templates + `init` scaffolding
+- CLI grant/revoke for `allowedEnvs`
+
+Still app-owned: Auth UI/sign-in flows, domain-specific RBAC, and full product security rules beyond the templates.
+
 ## Releasing
 
-Releases are automated with [semantic-release](https://semantic-release.org/) on every push to `main` (and via **Actions → Release → Run workflow**).
+Releases use [semantic-release](https://semantic-release.org/) on `main`.
 
-### One-time GitHub setup
-
-1. Create an npm **granular access token** with **Read and write** + **Bypass 2FA**.
-2. In the GitHub repo: **Settings → Secrets and variables → Actions → New repository secret**
-   - Name: `NPM_SECRET`
-   - Value: the npm token
-3. Push this workflow to `main`.
-
-`GITHUB_TOKEN` is provided automatically by Actions. The workflow maps `NPM_SECRET` → `NPM_TOKEN` for semantic-release.
-
-### Commit messages (required for version bumps)
-
-Use [Conventional Commits](https://www.conventionalcommits.org/):
-
-| Commit | Release |
-|---|---|
-| `fix: ...` | patch (`0.0.x`) |
-| `feat: ...` | minor (`0.x.0`) |
-| `feat!: ...` or `BREAKING CHANGE:` | major (`x.0.0`) |
-| `docs:`, `chore:`, `refactor:` (no `!`) | no release |
-
-Examples:
-
-```bash
-git commit -m "feat: support custom claim key"
-git commit -m "fix: reject duplicate origin mappings"
-git commit -m "feat!: rename grant-env CLI flags"
-```
-
-### If you already published 0.1.0 manually
-
-Tag that release so the next bump starts from there:
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-Otherwise the first conventional `feat:` on `main` will publish `1.0.0`.
+1. npm granular token (read/write + bypass 2FA)
+2. GitHub Actions secret `NPM_SECRET` (mapped to `NPM_TOKEN` in the workflow)
+3. Conventional Commits: `fix:` patch, `feat:` minor, `BREAKING CHANGE` / `feat!:` major
 
 ## License
 
