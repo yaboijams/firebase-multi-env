@@ -1,16 +1,20 @@
-import type { EnvRuntimeConfig } from './types.js';
+import type { EnvironmentDefinition, EnvRuntimeConfig } from './types.js';
 
-export type NormalizedEnvConfig = Required<
-  Pick<
-    EnvRuntimeConfig,
-    | 'databases'
-    | 'qaOrigins'
-    | 'prodOrigins'
-    | 'qaClaim'
-    | 'allowEmulatorWithoutClaim'
-    | 'qaAccessDeniedMessage'
-  >
->;
+export type NormalizedEnvironment = {
+  name: string;
+  database: string;
+  origins: string[];
+  requireClaim: boolean;
+};
+
+export type NormalizedEnvConfig = {
+  environments: Record<string, NormalizedEnvironment>;
+  originToEnv: Map<string, string>;
+  claimKey: string;
+  publicEnvironment: string;
+  allowEmulatorWithoutClaim: boolean;
+  accessDeniedMessage: string;
+};
 
 function normalizeOrigin(origin: string): string {
   return origin.trim().replace(/\/$/, '').toLowerCase();
@@ -26,21 +30,85 @@ function splitOrigins(value: string | undefined): string[] {
     .filter(Boolean);
 }
 
+function envOriginsOverride(envName: string): string[] {
+  const key = `HOST_ORIGINS_${envName.replace(/[^a-zA-Z0-9]/g, '_').toUpperCase()}`;
+  return splitOrigins(process.env[key]);
+}
+
+function resolvePublicEnvironment(
+  environments: Record<string, EnvironmentDefinition>,
+  configured?: string,
+): string {
+  if (configured) {
+    if (!environments[configured]) {
+      throw new Error(`publicEnvironment "${configured}" is not defined in environments.`);
+    }
+    return configured;
+  }
+
+  const firstPublic = Object.entries(environments).find(([, def]) => !def.requireClaim);
+  if (firstPublic) {
+    return firstPublic[0];
+  }
+
+  const names = Object.keys(environments);
+  if (names.length === 0) {
+    throw new Error('environments must include at least one environment.');
+  }
+  return names[0]!;
+}
+
 export function normalizeEnvConfig(config: EnvRuntimeConfig): NormalizedEnvConfig {
-  const qaFromEnv = splitOrigins(process.env.QA_HOST_ORIGINS);
-  const prodFromEnv = splitOrigins(process.env.PROD_HOST_ORIGINS);
+  const entries = Object.entries(config.environments);
+  if (entries.length === 0) {
+    throw new Error('environments must include at least one environment.');
+  }
+
+  const publicEnvironment = resolvePublicEnvironment(
+    config.environments,
+    config.publicEnvironment,
+  );
+
+  const environments: Record<string, NormalizedEnvironment> = {};
+  const originToEnv = new Map<string, string>();
+
+  for (const [name, def] of entries) {
+    const origins = [
+      ...new Set([
+        ...def.origins.map(normalizeOrigin),
+        ...envOriginsOverride(name),
+      ]),
+    ].filter(Boolean);
+
+    // Public env never requires a claim. All others require it unless explicitly disabled.
+    const gated = name === publicEnvironment ? false : def.requireClaim !== false;
+
+    environments[name] = {
+      name,
+      database: def.database,
+      origins,
+      requireClaim: gated,
+    };
+
+    for (const origin of origins) {
+      const existing = originToEnv.get(origin);
+      if (existing && existing !== name) {
+        throw new Error(
+          `Origin "${origin}" is mapped to both "${existing}" and "${name}".`,
+        );
+      }
+      originToEnv.set(origin, name);
+    }
+  }
 
   return {
-    databases: {
-      qa: config.databases.qa,
-      production: config.databases.production,
-    },
-    qaOrigins: [...new Set([...config.qaOrigins.map(normalizeOrigin), ...qaFromEnv])],
-    prodOrigins: [...new Set([...config.prodOrigins.map(normalizeOrigin), ...prodFromEnv])],
-    qaClaim: config.qaClaim ?? 'qaAccess',
+    environments,
+    originToEnv,
+    claimKey: config.claimKey ?? 'allowedEnvs',
+    publicEnvironment,
     allowEmulatorWithoutClaim: config.allowEmulatorWithoutClaim ?? true,
-    qaAccessDeniedMessage:
-      config.qaAccessDeniedMessage
-      ?? 'QA access required. Ask an admin to run: npx firebase-app-env grant-qa -- you@email.com (then sign out and back in).',
+    accessDeniedMessage:
+      config.accessDeniedMessage
+      ?? `Access denied for this environment. Ask an admin to run: npx firebase-multi-env grant-env <env> -- you@email.com (then sign out and back in).`,
   };
 }

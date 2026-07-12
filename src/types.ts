@@ -1,4 +1,16 @@
-export type AppEnvironment = 'qa' | 'production';
+export type AppEnvironment = string;
+
+export type EnvironmentDefinition = {
+  /** Firestore database ID for this environment */
+  database: string;
+  /** Hosting origins that map to this environment (normalized, no trailing slash) */
+  origins: string[];
+  /**
+   * When true, Auth custom claim allowlist must include this env name.
+   * Omit or false for public environments (typically production).
+   */
+  requireClaim?: boolean;
+};
 
 export type RuntimeEnv = {
   appEnv: AppEnvironment;
@@ -7,27 +19,27 @@ export type RuntimeEnv = {
 };
 
 export type EnvRuntimeConfig = {
-  /** Firestore database IDs per environment */
-  databases: Record<AppEnvironment, string>;
-  /** Hosting origins that always map to QA (normalized, no trailing slash) */
-  qaOrigins: string[];
-  /** Hosting origins that always map to production */
-  prodOrigins: string[];
+  /** Named environments (keys are env names used in claims and client hints) */
+  environments: Record<string, EnvironmentDefinition>;
   /**
-   * Auth custom claim required for QA.
-   * Production users never need this claim.
-   * @default 'qaAccess'
+   * Auth custom claim key holding an array of allowed env names.
+   * @default 'allowedEnvs'
    */
-  qaClaim?: string;
+  claimKey?: string;
   /**
-   * When running under Firebase emulators, skip the QA claim check.
+   * Environment that does not require a claim.
+   * Defaults to the first env with `requireClaim !== true`.
+   */
+  publicEnvironment?: string;
+  /**
+   * When running under Firebase emulators, skip the allowlist claim check.
    * @default true
    */
   allowEmulatorWithoutClaim?: boolean;
   /**
-   * Message shown when QA claim is missing.
+   * Message shown when gated-env access is denied.
    */
-  qaAccessDeniedMessage?: string;
+  accessDeniedMessage?: string;
 };
 
 export type RequestLike = {

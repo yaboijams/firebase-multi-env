@@ -2,7 +2,7 @@ import type { EnvRuntime } from './runtimeEnv.js';
 
 /**
  * Wrap a Firebase Functions v1 onCall handler.
- * Strips client `appEnv`, resolves the real env from Origin + claims, runs in ALS.
+ * Strips client `appEnv`, resolves the real env from Origin + allowlist claims, runs in ALS.
  *
  * Context is typed as `any` so peer `firebase-functions` versions do not conflict.
  */

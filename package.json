@@ -1,7 +1,7 @@
 {
-  "name": "firebase-app-env",
+  "name": "firebase-multi-env",
   "version": "0.1.0",
-  "description": "Secure QA vs production multi-environment support for Firebase apps (Origin binding, qaAccess claims, dual Firestore DBs)",
+  "description": "Secure multi-environment support for Firebase apps (Origin binding, allowedEnvs claims, per-env Firestore DBs)",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -11,7 +11,7 @@
     "node": ">=18"
   },
   "bin": {
-    "firebase-app-env": "./bin/cli.mjs"
+    "firebase-multi-env": "./bin/cli.mjs"
   },
   "exports": {
     ".": {
@@ -85,6 +85,6 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/yaboijams/firebase-app-env.git"
+    "url": "git+https://github.com/yaboijams/firebase-multi-env.git"
   }
 }

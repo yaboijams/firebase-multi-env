@@ -1,5 +1,5 @@
 /**
- * Per-request app environment resolution for dual Firestore databases.
+ * Per-request app environment resolution for multi-environment Firestore databases.
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -62,100 +62,134 @@ function isEmulatorRuntime(): boolean {
   );
 }
 
-function parseClientHint(clientEnv: unknown): AppEnvironment | null {
-  if (typeof clientEnv !== 'string') {
-    return null;
-  }
-  const raw = clientEnv.trim().toLowerCase();
-  if (raw === 'qa' || raw === 'production') {
-    return raw;
-  }
-  return null;
-}
-
 /**
  * Create a configured environment runtime for one Firebase app.
  *
  * Security model:
- * - Hosted QA origin → always QA DB; requires Auth custom claim (default `qaAccess`)
- * - Hosted prod origin → always production DB; no special claims
- * - Localhost / emulator → client `appEnv` is a hint; cloud QA requires the claim
+ * - Hosted Origin → mapped environment DB; gated envs require `allowedEnvs` claim
+ * - Public environment (typically production) → no special claims
+ * - Localhost / emulator → client `appEnv` is a hint; cloud gated envs require the claim
  * - Client `appEnv` alone cannot override hosted Origin
  */
 export function createEnvRuntime(config: EnvRuntimeConfig): EnvRuntime {
   const normalized = normalizeEnvConfig(config);
   const storage = new AsyncLocalStorage<RuntimeEnv>();
 
+  function knownEnv(name: string): boolean {
+    return Boolean(normalized.environments[name]);
+  }
+
+  function parseClientHint(clientEnv: unknown): AppEnvironment | null {
+    if (typeof clientEnv !== 'string') {
+      return null;
+    }
+    const raw = clientEnv.trim();
+    if (!raw || !knownEnv(raw)) {
+      return null;
+    }
+    return raw;
+  }
+
   function buildEnv(appEnv: AppEnvironment): RuntimeEnv {
+    const def = normalized.environments[appEnv];
+    if (!def) {
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        `Unknown environment "${appEnv}".`,
+      );
+    }
     return {
       appEnv,
       firestoreDatabaseId: process.env.FIRESTORE_EMULATOR_HOST
         ? '(default)'
-        : normalized.databases[appEnv],
+        : def.database,
       firestoreEnvTag: appEnv,
     };
   }
 
-  function hasQaAccessClaim(context: EnvRequestContext): boolean {
+  function allowedEnvsFromToken(context: EnvRequestContext): string[] {
     const token = context.auth?.token;
     if (!token) {
-      return false;
+      return [];
     }
-    return token[normalized.qaClaim] === true;
+    const value = token[normalized.claimKey];
+    if (!Array.isArray(value)) {
+      return [];
+    }
+    return value.filter((item): item is string => typeof item === 'string');
   }
 
-  function requireQaAccess(context: EnvRequestContext): void {
+  function hasEnvAccess(appEnv: AppEnvironment, context: EnvRequestContext): boolean {
+    const def = normalized.environments[appEnv];
+    if (!def?.requireClaim) {
+      return true;
+    }
+    return allowedEnvsFromToken(context).includes(appEnv);
+  }
+
+  function requireEnvAccess(appEnv: AppEnvironment, context: EnvRequestContext): void {
+    const def = normalized.environments[appEnv];
+    if (!def?.requireClaim) {
+      return;
+    }
     if (!context.auth) {
-      throw new functions.https.HttpsError('unauthenticated', 'Sign in required for QA.');
+      throw new functions.https.HttpsError(
+        'unauthenticated',
+        `Sign in required for environment "${appEnv}".`,
+      );
     }
-    if (!hasQaAccessClaim(context)) {
-      throw new functions.https.HttpsError('permission-denied', normalized.qaAccessDeniedMessage);
+    if (!hasEnvAccess(appEnv, context)) {
+      throw new functions.https.HttpsError(
+        'permission-denied',
+        normalized.accessDeniedMessage,
+      );
     }
+  }
+
+  function resolveHintedEnv(hint: AppEnvironment | null): AppEnvironment {
+    if (hint) {
+      return hint;
+    }
+    const fromProcess = process.env.APP_ENV?.trim();
+    if (fromProcess && knownEnv(fromProcess)) {
+      return fromProcess;
+    }
+    return normalized.publicEnvironment;
   }
 
   function resolveRequestEnv(clientEnv: unknown, context: EnvRequestContext): RuntimeEnv {
     const origin = originFromContext(context);
     const hint = parseClientHint(clientEnv);
 
-    if (origin && normalized.qaOrigins.includes(origin)) {
-      requireQaAccess(context);
-      return buildEnv('qa');
-    }
-
-    if (origin && normalized.prodOrigins.includes(origin)) {
-      return buildEnv('production');
+    if (origin) {
+      const mapped = normalized.originToEnv.get(origin);
+      if (mapped) {
+        requireEnvAccess(mapped, context);
+        return buildEnv(mapped);
+      }
     }
 
     const emulator = isEmulatorRuntime();
     const local = isLocalOrigin(origin);
 
     if (emulator || local || !origin) {
-      const wantsQa =
-        hint === 'qa'
-        || (hint !== 'production' && process.env.APP_ENV === 'qa');
-
-      if (wantsQa) {
-        if (!(emulator && normalized.allowEmulatorWithoutClaim)) {
-          requireQaAccess(context);
-        }
-        return buildEnv('qa');
+      const appEnv = resolveHintedEnv(hint);
+      if (!(emulator && normalized.allowEmulatorWithoutClaim)) {
+        requireEnvAccess(appEnv, context);
       }
-
-      return buildEnv('production');
+      return buildEnv(appEnv);
     }
 
-    if (hint === 'qa') {
-      requireQaAccess(context);
-      return buildEnv('qa');
-    }
-
-    return buildEnv('production');
+    // Unknown hosted origin: do not trust client to pick a gated env.
+    const appEnv = hint && !normalized.environments[hint]?.requireClaim
+      ? hint
+      : normalized.publicEnvironment;
+    requireEnvAccess(appEnv, context);
+    return buildEnv(appEnv);
   }
 
   function resolveProcessEnv(clientEnv?: unknown): RuntimeEnv {
-    const hint = parseClientHint(clientEnv);
-    const appEnv = hint ?? (process.env.APP_ENV === 'qa' ? 'qa' : 'production');
-    return buildEnv(appEnv);
+    return buildEnv(resolveHintedEnv(parseClientHint(clientEnv)));
   }
 
   function runWithEnv<T>(env: RuntimeEnv, fn: () => Promise<T> | T): Promise<T> {

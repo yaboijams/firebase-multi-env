@@ -2,7 +2,10 @@ import { httpsCallable, type Functions, type HttpsCallableResult } from 'firebas
 import type { AppEnvironment } from './types.js';
 
 export type CreateCallableOptions = {
-  /** Current client build environment (`qa` | `production`). Used as a hint on localhost. */
+  /**
+   * Current client build environment name (must match a configured env key).
+   * Used as a hint on localhost / emulators; hosted Origin always wins.
+   */
   appEnv: AppEnvironment;
 };
 

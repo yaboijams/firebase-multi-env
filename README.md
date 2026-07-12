@@ -1,14 +1,21 @@
-# firebase-app-env
+# firebase-multi-env
 
-Secure **QA vs production** multi-environment support for Firebase apps.
+Secure **multi-environment** support for Firebase apps.
 
-One Firebase project, two Firestore databases, two Hosting sites — with Origin binding and a QA-only Auth claim so **production users never need special rights**.
+One Firebase project, multiple Firestore databases, multiple Hosting sites — with Origin binding and an Auth allowlist claim so **production users never need special rights**.
 
-## Install
+## Local development (npm link)
 
 ```bash
-npm install firebase-app-env
+cd /path/to/firebase-multi-env
+npm run build
+npm link
+
+cd /path/to/your-app
+npm link firebase-multi-env
 ```
+
+Rebuild this package after source changes; consumers pick up `dist/` via the link.
 
 Peer dependencies (install what you use):
 
@@ -18,24 +25,27 @@ npm install firebase firebase-admin firebase-functions
 
 ## Security model
 
-| Request from | Database | Needs `qaAccess`? |
+| Request from | Database | Needs `allowedEnvs`? |
 |---|---|---|
-| Prod Hosting origin | `(default)` (configurable) | **No** |
-| QA Hosting origin | `qa-env` (configurable) | **Yes** |
-| Localhost → cloud QA | QA DB | **Yes** |
+| Public env Hosting origin (e.g. prod) | that env's DB | **No** |
+| Gated env Hosting origin (e.g. qual/cert) | that env's DB | **Yes** (claim must include the env name) |
+| Localhost → cloud gated env | gated DB | **Yes** |
 | Full local emulators | emulator default DB | **No** (optional) |
 
-Client `appEnv` is only a **hint** on localhost. Hosted Origin always wins (QA cannot spoof production).
+Client `appEnv` is only a **hint** on localhost. Hosted Origin always wins (gated origins cannot spoof production).
 
 ## One-time Firebase setup
 
 ```bash
-# Second Firestore database
-firebase firestore:databases:create qa-env --location nam5
+# Extra Firestore databases
+firebase firestore:databases:create qual-env --location nam5
+firebase firestore:databases:create cert-env --location nam5
 
-# Second Hosting site
-firebase hosting:sites:create myapp-qa
-firebase target:apply hosting qa myapp-qa
+# Extra Hosting sites
+firebase hosting:sites:create myapp-qual
+firebase hosting:sites:create myapp-cert
+firebase target:apply hosting qual myapp-qual
+firebase target:apply hosting cert myapp-cert
 firebase target:apply hosting prod myapp
 ```
 
@@ -45,45 +55,65 @@ Example `firebase.json` hosting + firestore entries:
 {
   "firestore": [
     { "database": "(default)", "rules": "firestore.prod.rules", "indexes": "firestore.indexes.json" },
-    { "database": "qa-env", "rules": "firestore.qa.rules", "indexes": "firestore.indexes.json" }
+    { "database": "qual-env", "rules": "firestore.qual.rules", "indexes": "firestore.indexes.json" },
+    { "database": "cert-env", "rules": "firestore.cert.rules", "indexes": "firestore.indexes.json" }
   ],
   "hosting": [
-    { "target": "qa", "public": "dist" },
+    { "target": "qual", "public": "dist" },
+    { "target": "cert", "public": "dist" },
     { "target": "prod", "public": "dist" }
   ]
 }
 ```
 
-### QA rules snippet
+### Gated-env rules snippet
 
-Require the claim on the QA database only (prod rules stay owner-only):
+Require the allowlist claim on gated databases only (prod rules stay owner-only):
 
 ```
-function hasQaAccess() {
-  return request.auth != null && request.auth.token.qaAccess == true;
+function hasEnvAccess(env) {
+  return request.auth != null
+    && request.auth.token.allowedEnvs is list
+    && env in request.auth.token.allowedEnvs;
 }
 function isOwner(userId) {
-  return hasQaAccess() && request.auth.uid == userId;
+  return hasEnvAccess('qual') && request.auth.uid == userId;
 }
 ```
 
 ## Cloud Functions
 
 ```ts
-import { createEnvRuntime, createGetDb } from 'firebase-app-env/server';
-import { createWithAppEnvV1 } from 'firebase-app-env/functions-v1';
-// or: import { createWithAppEnvV2 } from 'firebase-app-env/functions-v2';
+import { createEnvRuntime, createGetDb } from 'firebase-multi-env/server';
+import { createWithAppEnvV1 } from 'firebase-multi-env/functions-v1';
+// or: import { createWithAppEnvV2 } from 'firebase-multi-env/functions-v2';
 
 export const appEnvRuntime = createEnvRuntime({
-  databases: { qa: 'qa-env', production: '(default)' },
-  qaOrigins: [
-    'https://myapp-qa.web.app',
-    'https://myapp-qa.firebaseapp.com',
-  ],
-  prodOrigins: [
-    'https://myapp.web.app',
-    'https://myapp.firebaseapp.com',
-  ],
+  environments: {
+    production: {
+      database: '(default)',
+      origins: [
+        'https://myapp.web.app',
+        'https://myapp.firebaseapp.com',
+      ],
+    },
+    qual: {
+      database: 'qual-env',
+      origins: [
+        'https://myapp-qual.web.app',
+        'https://myapp-qual.firebaseapp.com',
+      ],
+      requireClaim: true,
+    },
+    cert: {
+      database: 'cert-env',
+      origins: [
+        'https://myapp-cert.web.app',
+        'https://myapp-cert.firebaseapp.com',
+      ],
+      requireClaim: true,
+    },
+  },
 });
 
 export const getDb = createGetDb(appEnvRuntime);
@@ -101,36 +131,34 @@ export const syncData = functions.https.onCall(withAppEnv(async (data, context) 
 // export const syncData = onCall(withAppEnvV2(async (request) => { ... }));
 ```
 
-Optional process env overrides: `QA_HOST_ORIGINS`, `PROD_HOST_ORIGINS` (comma-separated).
+Add or change domains anytime by updating an environment's `origins` list. Optional process env overrides: `HOST_ORIGINS_<ENV>` (comma-separated), e.g. `HOST_ORIGINS_QUAL`.
 
 ## Web client
 
-Vite modes:
-
-- `.env.development` → local / emulators (`VITE_APP_ENV=qa`)
-- `.env.qa` → QA Hosting build
-- `.env.production` → prod build
+Pass any configured env name into `createCallable`. How you load it is up to you (Vite, Next, hardcode, etc.):
 
 ```ts
-import { createCallable } from 'firebase-app-env/client';
+import { createCallable } from 'firebase-multi-env/client';
 import { getFunctions } from 'firebase/functions';
 
-const appEnv = import.meta.env.VITE_APP_ENV as 'qa' | 'production';
+const appEnv = import.meta.env.VITE_APP_ENV; // e.g. 'production' | 'qual' | 'cert'
 const callable = createCallable(getFunctions(app), { appEnv });
 
 await callable('syncData')({ /* payload */ });
 ```
 
-Use `getFirestore(app)` for `(default)` and `getFirestore(app, 'qa-env')` for QA. With emulators, keep the default DB.
+Use `getFirestore(app)` for `(default)` and `getFirestore(app, 'qual-env')` / `getFirestore(app, 'cert-env')` for gated DBs. With emulators, keep the default DB.
 
-## Grant QA access
+## Grant environment access
 
 ```bash
 gcloud auth application-default login
-npx firebase-app-env grant-qa --project my-project you@email.com
+npx firebase-multi-env grant-env qual --project my-project you@email.com
+npx firebase-multi-env grant-env cert --project my-project you@email.com
+# → { allowedEnvs: ['qual', 'cert'] }
 # sign out and sign in again
 
-npx firebase-app-env grant-qa --revoke --project my-project you@email.com
+npx firebase-multi-env grant-env qual --revoke --project my-project you@email.com
 ```
 
 ## License
