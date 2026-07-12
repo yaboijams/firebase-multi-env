@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { createEnvRuntime } from '../src/runtimeEnv.js';
-import { createWithAppEnvV1 } from '../src/functions-v1.js';
-import { createWithAppEnvV2 } from '../src/functions-v2.js';
-import { multiEnvConfig } from './helpers.js';
+import { createEnvRuntime } from '../../src/core/runtime.js';
+import { createWithAppEnvV1 } from '../../src/functions/v1.js';
+import { createWithAppEnvV2 } from '../../src/functions/v2.js';
+import { multiEnvConfig } from '../helpers.js';
 
 describe('function wrappers', () => {
   it('createWithAppEnvV1 strips appEnv and runs with resolved env', async () => {

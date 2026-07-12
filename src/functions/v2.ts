@@ -1,4 +1,4 @@
-import type { EnvRuntime } from './runtimeEnv.js';
+import type { EnvRuntime } from '../core/runtime.js';
 
 /**
  * Wrap a Firebase Functions v2 onCall handler.

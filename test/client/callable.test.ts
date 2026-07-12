@@ -6,7 +6,7 @@ vi.mock('firebase/functions', () => ({
   httpsCallable: (...args: unknown[]) => httpsCallable(...args),
 }));
 
-import { createCallable } from '../src/client.js';
+import { createCallable } from '../../src/client/callable.js';
 
 describe('createCallable', () => {
   beforeEach(() => {

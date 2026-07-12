@@ -1,4 +1,4 @@
-import type { EnvRuntimeConfig } from '../src/types.js';
+import type { EnvRuntimeConfig } from '../src/core/types.js';
 
 export const multiEnvConfig = {
   environments: {
