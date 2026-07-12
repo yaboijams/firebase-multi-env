@@ -169,11 +169,11 @@ Releases are automated with [semantic-release](https://semantic-release.org/) on
 
 1. Create an npm **granular access token** with **Read and write** + **Bypass 2FA**.
 2. In the GitHub repo: **Settings → Secrets and variables → Actions → New repository secret**
-   - Name: `NPM_TOKEN`
+   - Name: `NPM_SECRET`
    - Value: the npm token
 3. Push this workflow to `main`.
 
-`GITHUB_TOKEN` is provided automatically by Actions.
+`GITHUB_TOKEN` is provided automatically by Actions. The workflow maps `NPM_SECRET` → `NPM_TOKEN` for semantic-release.
 
 ### Commit messages (required for version bumps)
 

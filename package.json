@@ -50,6 +50,8 @@
   "scripts": {
     "build": "tsup",
     "clean": "rm -rf dist",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "prepublishOnly": "npm run build",
     "semantic-release": "semantic-release"
   },
@@ -90,7 +92,8 @@
     "firebase-functions": "^6.0.0",
     "semantic-release": "^25.0.6",
     "tsup": "^8.4.0",
-    "typescript": "^5.8.0"
+    "typescript": "^5.8.0",
+    "vitest": "^4.1.10"
   },
   "keywords": [
     "firebase",
