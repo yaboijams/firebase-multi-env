@@ -1,5 +1,7 @@
 # firebase-multi-env
 
+[![npm](https://img.shields.io/npm/v/firebase-multi-env.svg)](https://www.npmjs.com/package/firebase-multi-env)
+
 Secure **multi-environment** support for Firebase apps.
 
 One Firebase project, multiple Firestore databases, multiple Hosting sites — with Origin binding and an Auth allowlist claim so **production users never need special rights**.
