@@ -1,0 +1,90 @@
+{
+  "name": "firebase-app-env",
+  "version": "0.1.0",
+  "description": "Secure QA vs production multi-environment support for Firebase apps (Origin binding, qaAccess claims, dual Firestore DBs)",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "firebase-app-env": "./bin/cli.mjs"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js",
+      "require": "./dist/server.cjs"
+    },
+    "./functions-v1": {
+      "types": "./dist/functions-v1.d.ts",
+      "import": "./dist/functions-v1.js",
+      "require": "./dist/functions-v1.cjs"
+    },
+    "./functions-v2": {
+      "types": "./dist/functions-v2.d.ts",
+      "import": "./dist/functions-v2.js",
+      "require": "./dist/functions-v2.cjs"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "import": "./dist/client.js",
+      "require": "./dist/client.cjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "bin",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run build"
+  },
+  "peerDependencies": {
+    "firebase": ">=10",
+    "firebase-admin": ">=11",
+    "firebase-functions": ">=4"
+  },
+  "peerDependenciesMeta": {
+    "firebase": {
+      "optional": true
+    },
+    "firebase-admin": {
+      "optional": true
+    },
+    "firebase-functions": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "firebase": "^12.7.0",
+    "firebase-admin": "^13.0.0",
+    "firebase-functions": "^6.0.0",
+    "tsup": "^8.4.0",
+    "typescript": "^5.8.0"
+  },
+  "keywords": [
+    "firebase",
+    "firestore",
+    "multi-environment",
+    "qa",
+    "staging",
+    "cloud-functions"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yaboijams/firebase-app-env.git"
+  }
+}
