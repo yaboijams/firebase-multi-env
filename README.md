@@ -161,6 +161,50 @@ npx firebase-multi-env grant-env cert --project my-project you@email.com
 npx firebase-multi-env grant-env qual --revoke --project my-project you@email.com
 ```
 
+## Releasing
+
+Releases are automated with [semantic-release](https://semantic-release.org/) on every push to `main` (and via **Actions → Release → Run workflow**).
+
+### One-time GitHub setup
+
+1. Create an npm **granular access token** with **Read and write** + **Bypass 2FA**.
+2. In the GitHub repo: **Settings → Secrets and variables → Actions → New repository secret**
+   - Name: `NPM_TOKEN`
+   - Value: the npm token
+3. Push this workflow to `main`.
+
+`GITHUB_TOKEN` is provided automatically by Actions.
+
+### Commit messages (required for version bumps)
+
+Use [Conventional Commits](https://www.conventionalcommits.org/):
+
+| Commit | Release |
+|---|---|
+| `fix: ...` | patch (`0.0.x`) |
+| `feat: ...` | minor (`0.x.0`) |
+| `feat!: ...` or `BREAKING CHANGE:` | major (`x.0.0`) |
+| `docs:`, `chore:`, `refactor:` (no `!`) | no release |
+
+Examples:
+
+```bash
+git commit -m "feat: support custom claim key"
+git commit -m "fix: reject duplicate origin mappings"
+git commit -m "feat!: rename grant-env CLI flags"
+```
+
+### If you already published 0.1.0 manually
+
+Tag that release so the next bump starts from there:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Otherwise the first conventional `feat:` on `main` will publish `1.0.0`.
+
 ## License
 
 MIT

@@ -1,6 +1,6 @@
 {
   "name": "firebase-multi-env",
-  "version": "0.1.0",
+  "version": "0.0.0-development",
   "description": "Secure multi-environment support for Firebase apps (Origin binding, allowedEnvs claims, per-env Firestore DBs)",
   "license": "MIT",
   "type": "module",
@@ -11,7 +11,7 @@
     "node": ">=18"
   },
   "bin": {
-    "firebase-multi-env": "./bin/cli.mjs"
+    "firebase-multi-env": "bin/cli.mjs"
   },
   "exports": {
     ".": {
@@ -50,7 +50,19 @@
   "scripts": {
     "build": "tsup",
     "clean": "rm -rf dist",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "semantic-release": "semantic-release"
+  },
+  "release": {
+    "branches": [
+      "main"
+    ],
+    "plugins": [
+      "@semantic-release/commit-analyzer",
+      "@semantic-release/release-notes-generator",
+      "@semantic-release/npm",
+      "@semantic-release/github"
+    ]
   },
   "peerDependencies": {
     "firebase": ">=10",
@@ -69,9 +81,14 @@
     }
   },
   "devDependencies": {
+    "@semantic-release/commit-analyzer": "^13.0.1",
+    "@semantic-release/github": "^12.0.9",
+    "@semantic-release/npm": "^13.1.5",
+    "@semantic-release/release-notes-generator": "^14.1.1",
     "firebase": "^12.7.0",
     "firebase-admin": "^13.0.0",
     "firebase-functions": "^6.0.0",
+    "semantic-release": "^25.0.6",
     "tsup": "^8.4.0",
     "typescript": "^5.8.0"
   },
@@ -86,5 +103,8 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/yaboijams/firebase-multi-env.git"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
