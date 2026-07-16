@@ -6,6 +6,7 @@ describe('normalizeEnvConfig', () => {
   afterEach(() => {
     delete process.env.HOST_ORIGINS_QUAL;
     delete process.env.HOST_ORIGINS_PRODUCTION;
+    delete process.env.APP_ENV;
   });
 
   it('normalizes origins and defaults claim settings', () => {
@@ -108,5 +109,59 @@ describe('normalizeEnvConfig', () => {
     });
 
     expect(normalized.environments.staging?.requireClaim).toBe(true);
+  });
+
+  it('defaults isolation to unpinned with accept unknown origins', () => {
+    const normalized = normalizeEnvConfig(multiEnvConfig);
+    expect(normalized.pinned).toBe(false);
+    expect(normalized.pinnedEnvironment).toBeNull();
+    expect(normalized.rejectUnknownOrigin).toBe(false);
+    expect(normalized.requireRequestContext).toBe(false);
+  });
+
+  it('defaults pinned mode to reject unknown origins and require request context', () => {
+    const normalized = normalizeEnvConfig({
+      ...multiEnvConfig,
+      pinned: true,
+      pinnedEnvironment: 'qual',
+    });
+
+    expect(normalized.pinned).toBe(true);
+    expect(normalized.pinnedEnvironment).toBe('qual');
+    expect(normalized.rejectUnknownOrigin).toBe(true);
+    expect(normalized.requireRequestContext).toBe(true);
+  });
+
+  it('reads pinnedEnvironment from APP_ENV when pinned is true', () => {
+    process.env.APP_ENV = 'cert';
+    const normalized = normalizeEnvConfig({
+      ...multiEnvConfig,
+      pinned: true,
+    });
+    expect(normalized.pinnedEnvironment).toBe('cert');
+    delete process.env.APP_ENV;
+  });
+
+  it('throws when pinned environment is unknown', () => {
+    expect(() =>
+      normalizeEnvConfig({
+        ...multiEnvConfig,
+        pinned: true,
+        pinnedEnvironment: 'missing',
+      }),
+    ).toThrow(/pinnedEnvironment "missing"/);
+  });
+
+  it('allows overriding pinned defaults for rejectUnknownOrigin and requireRequestContext', () => {
+    const normalized = normalizeEnvConfig({
+      ...multiEnvConfig,
+      pinned: true,
+      pinnedEnvironment: 'qual',
+      rejectUnknownOrigin: false,
+      requireRequestContext: false,
+    });
+
+    expect(normalized.rejectUnknownOrigin).toBe(false);
+    expect(normalized.requireRequestContext).toBe(false);
   });
 });

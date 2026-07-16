@@ -1,3 +1,4 @@
+import { vi } from 'vitest';
 import type { EnvRuntimeConfig } from '../src/core/types.js';
 
 export const multiEnvConfig = {
@@ -21,6 +22,19 @@ export const multiEnvConfig = {
     },
   },
 } satisfies EnvRuntimeConfig;
+
+/** Pinned-isolation config for a single deploy environment. */
+export function pinnedConfig(
+  pinnedEnvironment: keyof typeof multiEnvConfig.environments,
+  overrides: Partial<EnvRuntimeConfig> = {},
+): EnvRuntimeConfig {
+  return {
+    ...multiEnvConfig,
+    pinned: true,
+    pinnedEnvironment,
+    ...overrides,
+  };
+}
 
 export function authContext(options?: {
   uid?: string;
@@ -50,5 +64,12 @@ export function authContext(options?: {
           },
         }
       : undefined,
+  };
+}
+
+export function mockResponse() {
+  return {
+    status: vi.fn().mockReturnThis(),
+    json: vi.fn(),
   };
 }

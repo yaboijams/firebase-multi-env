@@ -14,6 +14,10 @@ export type NormalizedEnvConfig = {
   publicEnvironment: string;
   allowEmulatorWithoutClaim: boolean;
   accessDeniedMessage: string;
+  pinned: boolean;
+  pinnedEnvironment: string | null;
+  rejectUnknownOrigin: boolean;
+  requireRequestContext: boolean;
 };
 
 function normalizeOrigin(origin: string): string {
@@ -58,15 +62,42 @@ function resolvePublicEnvironment(
   return names[0]!;
 }
 
+function resolvePinnedEnvironment(
+  environments: Record<string, EnvironmentDefinition>,
+  pinned: boolean,
+  configured?: string,
+): string | null {
+  if (!pinned) {
+    return null;
+  }
+
+  const envName = (configured ?? process.env.APP_ENV)?.trim();
+  if (!envName) {
+    throw new Error(
+      'pinned: true requires pinnedEnvironment or process.env.APP_ENV.',
+    );
+  }
+  if (!environments[envName]) {
+    throw new Error(`pinnedEnvironment "${envName}" is not defined in environments.`);
+  }
+  return envName;
+}
+
 export function normalizeEnvConfig(config: EnvRuntimeConfig): NormalizedEnvConfig {
   const entries = Object.entries(config.environments);
   if (entries.length === 0) {
     throw new Error('environments must include at least one environment.');
   }
 
+  const pinned = config.pinned ?? false;
   const publicEnvironment = resolvePublicEnvironment(
     config.environments,
     config.publicEnvironment,
+  );
+  const pinnedEnvironment = resolvePinnedEnvironment(
+    config.environments,
+    pinned,
+    config.pinnedEnvironment,
   );
 
   const environments: Record<string, NormalizedEnvironment> = {};
@@ -101,6 +132,12 @@ export function normalizeEnvConfig(config: EnvRuntimeConfig): NormalizedEnvConfi
     }
   }
 
+  const rejectUnknownOrigin =
+    config.rejectUnknownOrigin ?? pinned;
+
+  const requireRequestContext =
+    config.requireRequestContext ?? pinned;
+
   return {
     environments,
     originToEnv,
@@ -110,5 +147,9 @@ export function normalizeEnvConfig(config: EnvRuntimeConfig): NormalizedEnvConfi
     accessDeniedMessage:
       config.accessDeniedMessage
       ?? `Access denied for this environment. Ask an admin to run: npx firebase-multi-env grant-env <env> -- you@email.com (then sign out and back in).`,
+    pinned,
+    pinnedEnvironment,
+    rejectUnknownOrigin,
+    requireRequestContext,
   };
 }

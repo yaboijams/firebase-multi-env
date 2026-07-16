@@ -1,7 +1,17 @@
+import { getAuth } from 'firebase-admin/auth';
 import type { EnvRuntime } from '../core/runtime.js';
 import type { AuthLike } from '../core/types.js';
 
 type HeaderMap = Record<string, string | string[] | undefined>;
+
+export type WithAppEnvHttpOptions = {
+  /**
+   * Verify `Authorization: Bearer <idToken>` with Admin Auth when `req.auth` is absent.
+   * Recommended for raw `onRequest` handlers (Firebase does not populate auth by default).
+   * @default false
+   */
+  verifyIdToken?: boolean;
+};
 
 function headerValue(headers: HeaderMap, name: string): string | undefined {
   const direct = headers[name] ?? headers[name.toLowerCase()];
@@ -39,18 +49,60 @@ function authFromRequest(req: any): AuthLike {
   return null;
 }
 
+function bearerToken(headers: HeaderMap): string | null {
+  const authorization = headerValue(headers, 'authorization');
+  if (!authorization) {
+    return null;
+  }
+  const match = authorization.match(/^Bearer\s+(.+)$/i);
+  return match?.[1]?.trim() || null;
+}
+
+async function resolveAuth(req: any, verifyIdToken: boolean): Promise<AuthLike> {
+  const existing = authFromRequest(req);
+  if (existing) {
+    return existing;
+  }
+  if (!verifyIdToken) {
+    return null;
+  }
+
+  const token = bearerToken((req?.headers ?? {}) as HeaderMap);
+  if (!token) {
+    return null;
+  }
+
+  const decoded = await getAuth().verifyIdToken(token);
+  const auth = {
+    uid: decoded.uid,
+    token: decoded as unknown as Record<string, unknown>,
+  };
+  // Make verified auth visible to the handler.
+  req.auth = auth;
+  return auth;
+}
+
 /**
  * Wrap a Firebase Functions `onRequest` / Express-style handler.
  * Resolves env from Origin (+ optional localhost `x-app-env` / `?appEnv=` hint).
+ *
+ * For gated environments on raw HTTP, pass `{ verifyIdToken: true }` so
+ * Bearer ID tokens are verified before claim checks run.
  */
-export function createWithAppEnvHttp(runtime: EnvRuntime) {
+export function createWithAppEnvHttp(
+  runtime: EnvRuntime,
+  options: WithAppEnvHttpOptions = {},
+) {
+  const verifyIdToken = options.verifyIdToken ?? false;
+
   return function withAppEnvHttp<TResult = unknown>(
     handler: (req: any, res: any) => Promise<TResult> | TResult,
   ): (req: any, res: any) => Promise<TResult | void> {
     return async (req: any, res: any) => {
       try {
+        const auth = await resolveAuth(req, verifyIdToken);
         const env = runtime.resolveRequestEnv(clientHintFromRequest(req), {
-          auth: authFromRequest(req),
+          auth,
           rawRequest: {
             headers: (req?.headers ?? {}) as HeaderMap,
           },
@@ -67,6 +119,7 @@ export function createWithAppEnvHttp(runtime: EnvRuntime) {
             code === 'unauthenticated' ? 401
             : code === 'permission-denied' ? 403
             : code === 'failed-precondition' ? 400
+            : code === 'auth/id-token-expired' || code === 'auth/argument-error' ? 401
             : 500;
           res.status(status).json({ error: { code, message } });
           return;
