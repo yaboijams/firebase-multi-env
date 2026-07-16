@@ -45,10 +45,13 @@ Effects:
 
 - Origin must map to the pinned env (or localhost/emulator hint must match it)
 - Unknown / missing hosted Origin **rejects** by default
+- Referer fallback is **off** by default (`allowRefererFallback: false`)
+- Emulator host env vars on a real Cloud deploy are **refused**
 - `getDb()` / `getRuntimeEnv()` **throw** outside a `withAppEnv*` wrapper
+- Scripts/jobs should use `getDbForEnv('qual')` instead of bare `getDb()`
 - This process cannot resolve another environment’s database through the runtime
 
-Pair with IAM so `sa-qual` can only access `qual-env`. See `iam-sa-per-env.md`.
+Pair with IAM so `sa-qual` can only access `qual-env`. See `iam-sa-per-env.md` and `THREAT_MODEL.md`.
 
 ## Logical mode (default, backward compatible)
 

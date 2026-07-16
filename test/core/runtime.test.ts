@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { HttpsError } from 'firebase-functions/v1/https';
 import { createEnvRuntime } from '../../src/core/runtime.js';
-import { authContext, multiEnvConfig } from '../helpers.js';
+import { authContext, multiEnvConfig, pinnedConfig } from '../helpers.js';
 
 describe('createEnvRuntime', () => {
   afterEach(() => {
@@ -218,7 +218,7 @@ describe('createEnvRuntime', () => {
     expect(env.appEnv).toBe('preview');
   });
 
-  it('resolves env from referer when origin header is missing', () => {
+  it('resolves env from referer when origin header is missing (logical mode)', () => {
     const runtime = createEnvRuntime(multiEnvConfig);
     const env = runtime.resolveRequestEnv(undefined, authContext({
       referer: 'https://myapp-qual.web.app/dashboard?x=1',
@@ -229,6 +229,60 @@ describe('createEnvRuntime', () => {
     expect(env.appEnv).toBe('qual');
   });
 
+  it('ignores referer by default in pinned mode', () => {
+    const runtime = createEnvRuntime(pinnedConfig('qual'));
+
+    try {
+      runtime.resolveRequestEnv(undefined, authContext({
+        referer: 'https://myapp-qual.web.app/dashboard',
+        uid: 'user-1',
+        allowedEnvs: ['qual'],
+      }));
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: 'failed-precondition',
+        message: expect.stringMatching(/Missing Origin/i),
+      });
+    }
+  });
+
+  it('fires onResolveEnv for success and rejection', () => {
+    const events: Array<{ ok: boolean; resolvedEnv?: string; rejectedReason?: string }> = [];
+    const runtime = createEnvRuntime({
+      ...multiEnvConfig,
+      rejectUnknownOrigin: true,
+      onResolveEnv: (event) => {
+        events.push({
+          ok: event.ok,
+          resolvedEnv: event.resolvedEnv,
+          rejectedReason: event.rejectedReason,
+        });
+      },
+    });
+
+    runtime.resolveRequestEnv(undefined, authContext({
+      origin: 'https://myapp.web.app',
+    }));
+
+    try {
+      runtime.resolveRequestEnv(undefined, authContext({
+        origin: 'https://evil.example.com',
+      }));
+    } catch {
+      // expected
+    }
+
+    expect(events).toEqual([
+      { ok: true, resolvedEnv: 'production', rejectedReason: undefined },
+      {
+        ok: false,
+        resolvedEnv: undefined,
+        rejectedReason: 'Unrecognized Origin "https://evil.example.com".',
+      },
+    ]);
+  });
+
   it('exposes runtime env through AsyncLocalStorage', async () => {
     const runtime = createEnvRuntime(multiEnvConfig);
     const env = runtime.resolveProcessEnv('cert');
@@ -237,5 +291,27 @@ describe('createEnvRuntime', () => {
       expect(runtime.getEnvTag()).toBe('cert');
       expect(runtime.getRuntimeEnv().firestoreDatabaseId).toBe('cert-env');
     });
+  });
+
+  it('isolates parallel AsyncLocalStorage environments', async () => {
+    const runtime = createEnvRuntime(multiEnvConfig);
+    const qual = runtime.resolveProcessEnv('qual');
+    const cert = runtime.resolveProcessEnv('cert');
+    const seen: string[] = [];
+
+    await Promise.all([
+      runtime.runWithEnv(qual, async () => {
+        await new Promise((r) => setTimeout(r, 20));
+        seen.push(`qual:${runtime.getEnvTag()}`);
+        expect(runtime.getRuntimeEnv().firestoreDatabaseId).toBe('qual-env');
+      }),
+      runtime.runWithEnv(cert, async () => {
+        await new Promise((r) => setTimeout(r, 5));
+        seen.push(`cert:${runtime.getEnvTag()}`);
+        expect(runtime.getRuntimeEnv().firestoreDatabaseId).toBe('cert-env');
+      }),
+    ]);
+
+    expect(seen.sort()).toEqual(['cert:cert', 'qual:qual']);
   });
 });

@@ -143,6 +143,7 @@ function initProject(args) {
     { file: 'firestore.public.rules.snippet', to: join(snippetsDir, 'firestore.public.rules.snippet') },
     { file: 'MULTI_ENV_SETUP.md', to: join(targetRoot, 'MULTI_ENV_SETUP.md') },
     { file: 'ISOLATION.md', to: join(isolationDir, 'ISOLATION.md') },
+    { file: 'THREAT_MODEL.md', to: join(isolationDir, 'THREAT_MODEL.md') },
     { file: 'iam-sa-per-env.md', to: join(isolationDir, 'iam-sa-per-env.md') },
     { file: 'functions.pinned.qual.example.ts', to: join(isolationDir, 'functions.pinned.qual.example.ts') },
     { file: 'firebase.codebases.example.json', to: join(isolationDir, 'firebase.codebases.example.json') },

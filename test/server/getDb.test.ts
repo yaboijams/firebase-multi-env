@@ -96,4 +96,32 @@ describe('createGetDb', () => {
       expect(getFirestore).not.toHaveBeenCalledWith(expect.anything(), '(default)');
     });
   });
+
+  it('getDbForEnv opens an explicit environment without ALS', async () => {
+    const { createGetDbForEnv } = await import('../../src/server/getDb.js');
+    const runtime = createEnvRuntime(multiEnvConfig);
+    const getDbForEnv = createGetDbForEnv(runtime);
+
+    const db = getDbForEnv('qual') as { databaseId: string };
+    expect(db.databaseId).toBe('qual-env');
+    expect(getFirestore).toHaveBeenCalledWith(expect.anything(), 'qual-env');
+  });
+
+  it('getDbForEnv refuses a non-pinned env on pinned deploys', async () => {
+    const { createGetDbForEnv } = await import('../../src/server/getDb.js');
+    const runtime = createEnvRuntime(pinnedConfig('qual'));
+    const getDbForEnv = createGetDbForEnv(runtime);
+
+    expect(() => getDbForEnv('production')).toThrow(/pinned to "qual"/);
+    expect(getFirestore).not.toHaveBeenCalled();
+  });
+
+  it('getDbForEnv allows the pinned environment', async () => {
+    const { createGetDbForEnv } = await import('../../src/server/getDb.js');
+    const runtime = createEnvRuntime(pinnedConfig('qual'));
+    const getDbForEnv = createGetDbForEnv(runtime);
+
+    const db = getDbForEnv('qual') as { databaseId: string };
+    expect(db.databaseId).toBe('qual-env');
+  });
 });

@@ -222,4 +222,22 @@ describe('pinned isolation mode', () => {
     expect(env.appEnv).toBe('qual');
     expect(env.firestoreDatabaseId).toBe('(default)');
   });
+
+  it('does not use Referer when allowRefererFallback is false', () => {
+    const runtime = createEnvRuntime(pinnedConfig('qual'));
+
+    try {
+      runtime.resolveRequestEnv(undefined, authContext({
+        referer: 'https://myapp-qual.web.app/',
+        uid: 'user-1',
+        allowedEnvs: ['qual'],
+      }));
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: 'failed-precondition',
+        message: expect.stringMatching(/Missing Origin/i),
+      });
+    }
+  });
 });

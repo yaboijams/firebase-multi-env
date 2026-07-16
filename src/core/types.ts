@@ -18,9 +18,36 @@ export type RuntimeEnv = {
   firestoreEnvTag: AppEnvironment;
 };
 
-export type EnvRuntimeConfig = {
+/** How the runtime selected (or tried to select) an environment. */
+export type EnvResolveSource =
+  | 'origin'
+  | 'hint'
+  | 'process'
+  | 'public'
+  | 'pinned';
+
+/**
+ * Audit event for environment resolution.
+ * Fired for successful resolves and for rejections (when `ok` is false).
+ */
+export type EnvResolveEvent = {
+  ok: boolean;
+  resolvedEnv?: AppEnvironment;
+  origin: string | null;
+  uid: string | null;
+  functionName: string | null;
+  pinnedEnvironment: string | null;
+  databaseId?: string;
+  source?: EnvResolveSource;
+  allowedByClaim?: boolean;
+  rejectedReason?: string;
+};
+
+export type EnvRuntimeConfig<
+  TEnvs extends Record<string, EnvironmentDefinition> = Record<string, EnvironmentDefinition>,
+> = {
   /** Named environments (keys are env names used in claims and client hints) */
-  environments: Record<string, EnvironmentDefinition>;
+  environments: TEnvs;
   /**
    * Auth custom claim key holding an array of allowed env names.
    * @default 'allowedEnvs'
@@ -30,7 +57,7 @@ export type EnvRuntimeConfig = {
    * Environment that does not require a claim.
    * Defaults to the first env with `requireClaim !== true`.
    */
-  publicEnvironment?: string;
+  publicEnvironment?: keyof TEnvs & string;
   /**
    * When running under Firebase emulators, skip the allowlist claim check.
    * @default true
@@ -50,7 +77,7 @@ export type EnvRuntimeConfig = {
    * Environment this deploy is allowed to serve when `pinned` is true.
    * Defaults to `process.env.APP_ENV` when omitted.
    */
-  pinnedEnvironment?: string;
+  pinnedEnvironment?: keyof TEnvs & string;
   /**
    * When true, unknown or missing hosted Origin throws `failed-precondition`.
    * When false, fall back to `publicEnvironment` (legacy logical behavior).
@@ -63,6 +90,23 @@ export type EnvRuntimeConfig = {
    * Defaults to `true` when `pinned` is true, otherwise `false`.
    */
   requireRequestContext?: boolean;
+  /**
+   * When true, missing Origin may fall back to the Referer header (dev convenience).
+   * Defaults to `false` when `pinned` is true, otherwise `true` for backward compatibility.
+   * Referer is not a security boundary — keep this off in hardened deploys.
+   */
+  allowRefererFallback?: boolean;
+  /**
+   * When true, refuse `FIRESTORE_EMULATOR_HOST` (and friends) on a deployed Cloud Function.
+   * Prevents a leaked emulator env var from silently routing all DBs to `(default)`.
+   * Defaults to `true` when `pinned` is true, otherwise `false`.
+   */
+  refuseEmulatorEnvOutsideEmulator?: boolean;
+  /**
+   * Optional audit hook invoked on every resolve attempt (success or rejection).
+   * Errors from the hook are swallowed so they cannot break the request path.
+   */
+  onResolveEnv?: (event: EnvResolveEvent) => void | Promise<void>;
 };
 
 export type RequestLike = {

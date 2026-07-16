@@ -117,6 +117,8 @@ describe('normalizeEnvConfig', () => {
     expect(normalized.pinnedEnvironment).toBeNull();
     expect(normalized.rejectUnknownOrigin).toBe(false);
     expect(normalized.requireRequestContext).toBe(false);
+    expect(normalized.allowRefererFallback).toBe(true);
+    expect(normalized.refuseEmulatorEnvOutsideEmulator).toBe(false);
   });
 
   it('defaults pinned mode to reject unknown origins and require request context', () => {
@@ -130,6 +132,8 @@ describe('normalizeEnvConfig', () => {
     expect(normalized.pinnedEnvironment).toBe('qual');
     expect(normalized.rejectUnknownOrigin).toBe(true);
     expect(normalized.requireRequestContext).toBe(true);
+    expect(normalized.allowRefererFallback).toBe(false);
+    expect(normalized.refuseEmulatorEnvOutsideEmulator).toBe(true);
   });
 
   it('reads pinnedEnvironment from APP_ENV when pinned is true', () => {
@@ -159,9 +163,30 @@ describe('normalizeEnvConfig', () => {
       pinnedEnvironment: 'qual',
       rejectUnknownOrigin: false,
       requireRequestContext: false,
+      allowRefererFallback: true,
+      refuseEmulatorEnvOutsideEmulator: false,
     });
 
     expect(normalized.rejectUnknownOrigin).toBe(false);
     expect(normalized.requireRequestContext).toBe(false);
+    expect(normalized.allowRefererFallback).toBe(true);
+    expect(normalized.refuseEmulatorEnvOutsideEmulator).toBe(false);
+  });
+
+  it('refuses emulator env vars on a cloud deploy when pinned', () => {
+    process.env.K_SERVICE = 'apiQual';
+    process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080';
+    try {
+      expect(() =>
+        normalizeEnvConfig({
+          ...multiEnvConfig,
+          pinned: true,
+          pinnedEnvironment: 'qual',
+        }),
+      ).toThrow(/Emulator env var/);
+    } finally {
+      delete process.env.K_SERVICE;
+      delete process.env.FIRESTORE_EMULATOR_HOST;
+    }
   });
 });

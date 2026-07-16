@@ -2,21 +2,21 @@
 
 [![npm](https://img.shields.io/npm/v/firebase-multi-env.svg)](https://www.npmjs.com/package/firebase-multi-env)
 
-**Multi-environment routing** for Firebase apps: Origin → environment → Firestore database, with claim-based authorization for gated environments.
+**Hardened single-project environment isolation** for Firebase: Origin → environment → Firestore database, with claim-based authorization for gated environments and optional **pinned** per-env deploys.
 
 One Firebase project, multiple Firestore databases, multiple Hosting sites. Production users do not need special rights; gated envs (qual/cert/…) require an `allowedEnvs` claim.
 
-> Environment routing based on recognized origins, with authenticated claim-based authorization for gated environments. Hard isolation between databases is a deploy/IAM concern — see [Isolation](#isolation-pinned).
+> This package does **not** replace separate Firebase projects. Prefer **pinned mode + per-env service accounts** when you want shared Auth and AWS-style role/env separation inside one project. Separate projects remain the strongest blast-radius boundary — see [Security model](#security-model) and `templates/THREAT_MODEL.md`.
 
 ## Package layout
 
 ```text
 src/
   core/        # types, config normalization, env runtime
-  server/      # getDb, auth guards
+  server/      # getDb, getDbForEnv, auth guards
   functions/   # callable v1/v2 + HTTP wrappers
   client/      # callable, client Firestore, multi-env client kit
-templates/     # rules snippets, isolation docs, pinned deploy examples
+templates/     # rules snippets, isolation + threat-model docs, pinned deploy examples
 bin/           # grant-env, init, doctor
 ```
 
@@ -24,7 +24,7 @@ Public imports:
 
 | Import | Purpose |
 |---|---|
-| `firebase-multi-env/server` | `createEnvRuntime`, `createGetDb`, guards |
+| `firebase-multi-env/server` | `createEnvRuntime`, `createGetDb`, `createGetDbForEnv`, guards |
 | `firebase-multi-env/functions-v1` | callable wrapper (v1) |
 | `firebase-multi-env/functions-v2` | callable wrapper (v2) |
 | `firebase-multi-env/http` | `onRequest` / Express-style wrapper |
@@ -56,13 +56,19 @@ npm link firebase-multi-env
 
 Client `appEnv` is only a **hint** on localhost. Hosted Origin always wins when recognized.
 
-This is **logical request routing**, not a cryptographic Hosting lock and not IAM isolation between databases.
+This is **logical request routing** plus optional **pinned deploy isolation**. It is not a cryptographic Hosting lock and not a substitute for IAM between databases.
 
-## Isolation (`pinned`)
+**Protects against:** client `appEnv` overrides, accidental dynamic DB selection, ungated non-prod access, wrong Origin on a pinned runtime, silent `getDb()` outside request context (when configured), leaked emulator env vars on pinned deploys.
+
+**Does not automatically protect against:** overly broad service accounts, direct Admin SDK bypasses, shared secrets, bad IAM/CI, or shared-project blast radius.
+
+Full matrix: [`SECURITY.md`](./SECURITY.md) and [`templates/THREAT_MODEL.md`](./templates/THREAT_MODEL.md).
+
+## Isolation (`pinned`) — recommended for production
 
 | `pinned` | Deploy shape | What Origin does |
 |---|---|---|
-| `false` (default) | One Functions runtime may serve many envs | **Selects** which DB |
+| `false` (default) | One Functions runtime may serve many envs | **Selects** which DB (mainly for local/dev) |
 | `true` | One deploy (+ SA) per env | **Confirms** the pinned env |
 
 **Pinned** is the recommended production posture inside one GCP project:
@@ -72,6 +78,7 @@ export const appEnvRuntime = createEnvRuntime({
   pinned: true,
   pinnedEnvironment: process.env.APP_ENV, // "qual" for the qual deploy
   environments: { /* ... */ },
+  onResolveEnv: (event) => logger.info('env_resolved', event), // optional audit
 });
 ```
 
@@ -79,21 +86,37 @@ Pinned defaults:
 
 - Unknown / missing hosted Origin → **reject** (`rejectUnknownOrigin: true`)
 - `getDb()` / `getRuntimeEnv()` outside a request wrapper → **throw**
+- Referer fallback → **off** (`allowRefererFallback: false`)
+- Emulator host env vars on a real deploy → **refuse**
 - Runtime refuses to serve any env other than the pinned one
 
 Pair with a dedicated service account per env (do **not** run these Functions as the project default SA). Templates:
 
 - `multi-env/ISOLATION.md` (via `init`)
+- `multi-env/THREAT_MODEL.md`
 - `multi-env/iam-sa-per-env.md`
 - `multi-env/functions.pinned.qual.example.ts`
+
+Scripts and background jobs should use an explicit DB accessor (never rely on silent defaults):
+
+```ts
+import { createGetDb, createGetDbForEnv } from 'firebase-multi-env/server';
+
+export const getDb = createGetDb(appEnvRuntime);
+export const getDbForEnv = createGetDbForEnv(appEnvRuntime);
+
+// in a scheduled job / script:
+const db = getDbForEnv('qual');
+```
 
 Optional hardening without pinning:
 
 ```ts
 createEnvRuntime({
-  pinned: false, // default
+  pinned: false, // default — prefer pinned for production
   rejectUnknownOrigin: true,
   requireRequestContext: true,
+  allowRefererFallback: false,
   environments: { /* ... */ },
 });
 ```
@@ -148,6 +171,7 @@ Rules templates ship in `templates/` (and via `init`). Gated DBs must check `all
 import {
   createEnvRuntime,
   createGetDb,
+  createGetDbForEnv,
   requireAuth,
   requireOwner,
 } from 'firebase-multi-env/server';
@@ -173,6 +197,7 @@ export const appEnvRuntime = createEnvRuntime({
 });
 
 export const getDb = createGetDb(appEnvRuntime);
+export const getDbForEnv = createGetDbForEnv(appEnvRuntime);
 export const withAppEnv = createWithAppEnvV1(appEnvRuntime);
 
 export const syncData = functions.https.onCall(withAppEnv(async (data, context) => {
@@ -241,14 +266,19 @@ npx firebase-multi-env grant-env qual --revoke --project my-project you@email.co
 ## What this package covers
 
 - Origin → environment → Firestore database routing
-- `pinned` / unpinned routing modes
+- `pinned` / unpinned routing modes (pinned recommended for production)
 - Gated-env allowlist claims for Functions (callable + HTTP)
+- Hardened Origin parsing (no multi-value / `null` / non-http schemes)
+- Optional Referer fallback (off by default when pinned)
+- Emulator-env leak refusal on deployed pinned functions
+- `getDbForEnv` for scripts/jobs; fail-closed `getDb` when request context is required
+- `onResolveEnv` audit hook
 - Optional HTTP ID token verification
 - Client callable + Firestore helpers
 - Server guards (`requireAuth`, `requireOwner`, `requireClaim`)
 - Rules templates + `init` / `doctor` scaffolding
 - CLI grant/revoke for `allowedEnvs`
-- Docs/templates for per-env service accounts (one-project hard boundary)
+- Docs/templates for per-env service accounts and threat model
 
 Still app-owned: Auth UI/sign-in flows, domain-specific RBAC, IAM bindings, org policies, and full product security rules beyond the templates.
 
