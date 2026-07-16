@@ -1,4 +1,4 @@
-import type { EnvironmentDefinition, EnvRuntimeConfig } from './types.js';
+import type { EnvironmentDefinition, EnvRuntimeConfig, EnvResolveEvent } from './types.js';
 
 export type NormalizedEnvironment = {
   name: string;
@@ -18,6 +18,9 @@ export type NormalizedEnvConfig = {
   pinnedEnvironment: string | null;
   rejectUnknownOrigin: boolean;
   requireRequestContext: boolean;
+  allowRefererFallback: boolean;
+  refuseEmulatorEnvOutsideEmulator: boolean;
+  onResolveEnv: ((event: EnvResolveEvent) => void | Promise<void>) | null;
 };
 
 function normalizeOrigin(origin: string): string {
@@ -52,7 +55,7 @@ function resolvePublicEnvironment(
 
   const firstPublic = Object.entries(environments).find(([, def]) => !def.requireClaim);
   if (firstPublic) {
-    return firstPublic[0];
+    return firstPublic[0]!;
   }
 
   const names = Object.keys(environments);
@@ -83,19 +86,62 @@ function resolvePinnedEnvironment(
   return envName;
 }
 
-export function normalizeEnvConfig(config: EnvRuntimeConfig): NormalizedEnvConfig {
-  const entries = Object.entries(config.environments);
+/** True when running as a deployed Cloud Function / Cloud Run service (not the Functions emulator). */
+export function isCloudDeployedRuntime(): boolean {
+  if (process.env.FUNCTIONS_EMULATOR === 'true') {
+    return false;
+  }
+  return Boolean(
+    process.env.K_SERVICE
+    || process.env.FUNCTION_TARGET
+    || process.env.FUNCTION_NAME
+    || process.env.X_GOOGLE_FUNCTION_NAME,
+  );
+}
+
+/**
+ * Throw if emulator Firestore/Auth hosts are set on a real deploy.
+ * A leaked FIRESTORE_EMULATOR_HOST would otherwise silently force `(default)`.
+ */
+export function assertNoEmulatorEnvLeak(refuse: boolean): void {
+  if (!refuse || !isCloudDeployedRuntime()) {
+    return;
+  }
+
+  const leaks = [
+    'FIRESTORE_EMULATOR_HOST',
+    'FIREBASE_AUTH_EMULATOR_HOST',
+    'FIREBASE_DATABASE_EMULATOR_HOST',
+    'FIREBASE_STORAGE_EMULATOR_HOST',
+  ].filter((key) => Boolean(process.env[key]?.trim()));
+
+  if (leaks.length > 0) {
+    throw new Error(
+      `Emulator env var(s) set on a deployed function: ${leaks.join(', ')}. `
+      + 'Unset them, or disable refuseEmulatorEnvOutsideEmulator if intentional.',
+    );
+  }
+}
+
+export function normalizeEnvConfig<
+  TEnvs extends Record<string, EnvironmentDefinition>,
+>(
+  config: EnvRuntimeConfig<TEnvs>,
+): NormalizedEnvConfig {
+  const entries = Object.entries(config.environments) as Array<
+    [string, EnvironmentDefinition]
+  >;
   if (entries.length === 0) {
     throw new Error('environments must include at least one environment.');
   }
 
   const pinned = config.pinned ?? false;
   const publicEnvironment = resolvePublicEnvironment(
-    config.environments,
+    config.environments as Record<string, EnvironmentDefinition>,
     config.publicEnvironment,
   );
   const pinnedEnvironment = resolvePinnedEnvironment(
-    config.environments,
+    config.environments as Record<string, EnvironmentDefinition>,
     pinned,
     config.pinnedEnvironment,
   );
@@ -138,6 +184,14 @@ export function normalizeEnvConfig(config: EnvRuntimeConfig): NormalizedEnvConfi
   const requireRequestContext =
     config.requireRequestContext ?? pinned;
 
+  const allowRefererFallback =
+    config.allowRefererFallback ?? !pinned;
+
+  const refuseEmulatorEnvOutsideEmulator =
+    config.refuseEmulatorEnvOutsideEmulator ?? pinned;
+
+  assertNoEmulatorEnvLeak(refuseEmulatorEnvOutsideEmulator);
+
   return {
     environments,
     originToEnv,
@@ -151,5 +205,8 @@ export function normalizeEnvConfig(config: EnvRuntimeConfig): NormalizedEnvConfi
     pinnedEnvironment,
     rejectUnknownOrigin,
     requireRequestContext,
+    allowRefererFallback,
+    refuseEmulatorEnvOutsideEmulator,
+    onResolveEnv: config.onResolveEnv ?? null,
   };
 }

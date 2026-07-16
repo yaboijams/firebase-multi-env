@@ -51,6 +51,7 @@
     "bin",
     "templates",
     "README.md",
+    "SECURITY.md",
     "LICENSE"
   ],
   "scripts": {
