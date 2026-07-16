@@ -1,1 +1,4 @@
-export { createWithAppEnvHttp } from './functions/http.js';
+export {
+  createWithAppEnvHttp,
+  type WithAppEnvHttpOptions,
+} from './functions/http.js';

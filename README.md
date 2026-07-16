@@ -2,9 +2,11 @@
 
 [![npm](https://img.shields.io/npm/v/firebase-multi-env.svg)](https://www.npmjs.com/package/firebase-multi-env)
 
-Secure **multi-environment** support for Firebase apps.
+**Multi-environment routing** for Firebase apps: Origin → environment → Firestore database, with claim-based authorization for gated environments.
 
-One Firebase project, multiple Firestore databases, multiple Hosting sites — with Origin binding and an Auth allowlist claim so **production users never need special rights**.
+One Firebase project, multiple Firestore databases, multiple Hosting sites. Production users do not need special rights; gated envs (qual/cert/…) require an `allowedEnvs` claim.
+
+> Environment routing based on recognized origins, with authenticated claim-based authorization for gated environments. Hard isolation between databases is a deploy/IAM concern — see [Isolation](#isolation-pinned).
 
 ## Package layout
 
@@ -14,8 +16,8 @@ src/
   server/      # getDb, auth guards
   functions/   # callable v1/v2 + HTTP wrappers
   client/      # callable, client Firestore, multi-env client kit
-templates/     # Firestore rules snippets + setup stub
-bin/           # grant-env + init CLI
+templates/     # rules snippets, isolation docs, pinned deploy examples
+bin/           # grant-env, init, doctor
 ```
 
 Public imports:
@@ -52,18 +54,62 @@ npm link firebase-multi-env
 | Localhost → cloud gated env | gated DB | **Yes** |
 | Full local emulators | emulator default DB | **No** (optional) |
 
-Client `appEnv` is only a **hint** on localhost. Hosted Origin always wins.
+Client `appEnv` is only a **hint** on localhost. Hosted Origin always wins when recognized.
+
+This is **logical request routing**, not a cryptographic Hosting lock and not IAM isolation between databases.
+
+## Isolation (`pinned`)
+
+| `pinned` | Deploy shape | What Origin does |
+|---|---|---|
+| `false` (default) | One Functions runtime may serve many envs | **Selects** which DB |
+| `true` | One deploy (+ SA) per env | **Confirms** the pinned env |
+
+**Pinned** is the recommended production posture inside one GCP project:
+
+```ts
+export const appEnvRuntime = createEnvRuntime({
+  pinned: true,
+  pinnedEnvironment: process.env.APP_ENV, // "qual" for the qual deploy
+  environments: { /* ... */ },
+});
+```
+
+Pinned defaults:
+
+- Unknown / missing hosted Origin → **reject** (`rejectUnknownOrigin: true`)
+- `getDb()` / `getRuntimeEnv()` outside a request wrapper → **throw**
+- Runtime refuses to serve any env other than the pinned one
+
+Pair with a dedicated service account per env (do **not** run these Functions as the project default SA). Templates:
+
+- `multi-env/ISOLATION.md` (via `init`)
+- `multi-env/iam-sa-per-env.md`
+- `multi-env/functions.pinned.qual.example.ts`
+
+Optional hardening without pinning:
+
+```ts
+createEnvRuntime({
+  pinned: false, // default
+  rejectUnknownOrigin: true,
+  requireRequestContext: true,
+  environments: { /* ... */ },
+});
+```
 
 ## Quick start scaffolding
 
 ```bash
 npx firebase-multi-env init
+npx firebase-multi-env doctor
 ```
 
 Writes:
 
 - `firestore.rules.snippets/` (gated + public templates)
 - `MULTI_ENV_SETUP.md`
+- `multi-env/` isolation docs + pinned deploy examples
 
 ## One-time Firebase setup
 
@@ -145,7 +191,8 @@ Optional overrides: `HOST_ORIGINS_<ENV>` (comma-separated).
 import { createWithAppEnvHttp } from 'firebase-multi-env/http';
 import { onRequest } from 'firebase-functions/v2/https';
 
-const withHttp = createWithAppEnvHttp(appEnvRuntime);
+// verifyIdToken is recommended: onRequest does not populate req.auth by default.
+const withHttp = createWithAppEnvHttp(appEnvRuntime, { verifyIdToken: true });
 
 export const api = onRequest(withHttp(async (req, res) => {
   const db = getDb();
@@ -194,13 +241,16 @@ npx firebase-multi-env grant-env qual --revoke --project my-project you@email.co
 ## What this package covers
 
 - Origin → environment → Firestore database routing
+- `pinned` / unpinned routing modes
 - Gated-env allowlist claims for Functions (callable + HTTP)
+- Optional HTTP ID token verification
 - Client callable + Firestore helpers
 - Server guards (`requireAuth`, `requireOwner`, `requireClaim`)
-- Rules templates + `init` scaffolding
+- Rules templates + `init` / `doctor` scaffolding
 - CLI grant/revoke for `allowedEnvs`
+- Docs/templates for per-env service accounts (one-project hard boundary)
 
-Still app-owned: Auth UI/sign-in flows, domain-specific RBAC, and full product security rules beyond the templates.
+Still app-owned: Auth UI/sign-in flows, domain-specific RBAC, IAM bindings, org policies, and full product security rules beyond the templates.
 
 ## Releasing
 

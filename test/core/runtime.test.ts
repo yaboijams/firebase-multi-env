@@ -140,6 +140,84 @@ describe('createEnvRuntime', () => {
     expect(env.appEnv).toBe('production');
   });
 
+  it('rejects unknown hosted origins when rejectUnknownOrigin is true', () => {
+    const runtime = createEnvRuntime({
+      ...multiEnvConfig,
+      rejectUnknownOrigin: true,
+    });
+
+    try {
+      runtime.resolveRequestEnv('qual', authContext({
+        origin: 'https://evil.example.com',
+        uid: 'user-1',
+        allowedEnvs: ['qual'],
+      }));
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toMatchObject({ code: 'failed-precondition' });
+    }
+  });
+
+  it('rejects missing origin when rejectUnknownOrigin is true', () => {
+    const runtime = createEnvRuntime({
+      ...multiEnvConfig,
+      rejectUnknownOrigin: true,
+    });
+
+    try {
+      runtime.resolveRequestEnv(undefined, {});
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toMatchObject({ code: 'failed-precondition' });
+    }
+  });
+
+  it('silently defaults getRuntimeEnv outside ALS in logical mode', () => {
+    const runtime = createEnvRuntime(multiEnvConfig);
+    expect(runtime.getRuntimeEnv().appEnv).toBe('production');
+  });
+
+  it('throws getRuntimeEnv outside ALS when requireRequestContext is true', () => {
+    const runtime = createEnvRuntime({
+      ...multiEnvConfig,
+      requireRequestContext: true,
+    });
+
+    try {
+      runtime.getRuntimeEnv();
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toMatchObject({ code: 'failed-precondition' });
+    }
+  });
+
+  it('allows non-gated client hint on unknown hosted origins', () => {
+    const runtime = createEnvRuntime({
+      environments: {
+        production: {
+          database: '(default)',
+          origins: ['https://myapp.web.app'],
+        },
+        preview: {
+          database: 'preview-env',
+          origins: ['https://myapp-preview.web.app'],
+          requireClaim: false,
+        },
+        qual: {
+          database: 'qual-env',
+          origins: ['https://myapp-qual.web.app'],
+          requireClaim: true,
+        },
+      },
+      publicEnvironment: 'production',
+    });
+
+    const env = runtime.resolveRequestEnv('preview', authContext({
+      origin: 'https://evil.example.com',
+    }));
+    expect(env.appEnv).toBe('preview');
+  });
+
   it('resolves env from referer when origin header is missing', () => {
     const runtime = createEnvRuntime(multiEnvConfig);
     const env = runtime.resolveRequestEnv(undefined, authContext({

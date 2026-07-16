@@ -1,7 +1,7 @@
 {
   "name": "firebase-multi-env",
   "version": "0.0.0-development",
-  "description": "Secure multi-environment support for Firebase apps (Origin binding, allowedEnvs claims, per-env Firestore DBs)",
+  "description": "Multi-environment Firebase routing (Origin + allowedEnvs claims) with optional pinned per-env deploys",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.cjs",

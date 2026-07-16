@@ -1,0 +1,54 @@
+{
+  "comment": "Example multi-codebase layout. Adjust paths to your monorepo. Each codebase deploys with its own APP_ENV and runtime service account.",
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "prod",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log",
+        "**/functions.pinned.qual.example.ts"
+      ]
+    },
+    {
+      "source": "functions-qual",
+      "codebase": "qual",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log"
+      ]
+    }
+  ],
+  "firestore": [
+    {
+      "database": "(default)",
+      "rules": "firestore.prod.rules",
+      "indexes": "firestore.indexes.json"
+    },
+    {
+      "database": "qual-env",
+      "rules": "firestore.qual.rules",
+      "indexes": "firestore.indexes.json"
+    }
+  ],
+  "hosting": [
+    {
+      "target": "prod",
+      "public": "dist",
+      "rewrites": [
+        { "source": "/api/**", "function": { "functionId": "api", "codebase": "prod" } }
+      ]
+    },
+    {
+      "target": "qual",
+      "public": "dist",
+      "rewrites": [
+        { "source": "/api/**", "function": { "functionId": "api", "codebase": "qual" } }
+      ]
+    }
+  ]
+}

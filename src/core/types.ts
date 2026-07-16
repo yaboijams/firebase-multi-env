@@ -40,6 +40,29 @@ export type EnvRuntimeConfig = {
    * Message shown when gated-env access is denied.
    */
   accessDeniedMessage?: string;
+  /**
+   * When true, this deploy is bound to one env/SA; Origin confirms, never cross-selects.
+   * When false/omitted, one runtime may serve many envs and Origin selects the DB.
+   * @default false
+   */
+  pinned?: boolean;
+  /**
+   * Environment this deploy is allowed to serve when `pinned` is true.
+   * Defaults to `process.env.APP_ENV` when omitted.
+   */
+  pinnedEnvironment?: string;
+  /**
+   * When true, unknown or missing hosted Origin throws `failed-precondition`.
+   * When false, fall back to `publicEnvironment` (legacy logical behavior).
+   * Defaults to `true` when `pinned` is true, otherwise `false`.
+   */
+  rejectUnknownOrigin?: boolean;
+  /**
+   * When true, `getRuntimeEnv()` / `getDb()` throw outside an active request ALS store
+   * instead of silently resolving process/public defaults.
+   * Defaults to `true` when `pinned` is true, otherwise `false`.
+   */
+  requireRequestContext?: boolean;
 };
 
 export type RequestLike = {

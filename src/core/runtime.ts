@@ -65,11 +65,16 @@ function isEmulatorRuntime(): boolean {
 /**
  * Create a configured environment runtime for one Firebase app.
  *
- * Security model:
+ * Security model (`pinned: false`, default):
  * - Hosted Origin → mapped environment DB; gated envs require `allowedEnvs` claim
  * - Public environment (typically production) → no special claims
  * - Localhost / emulator → client `appEnv` is a hint; cloud gated envs require the claim
  * - Client `appEnv` alone cannot override hosted Origin
+ *
+ * Security model (`pinned: true`):
+ * - This deploy serves only `pinnedEnvironment` (usually via APP_ENV + dedicated SA)
+ * - Origin must map to that env (or localhost/emulator hint must match it)
+ * - Unknown / missing hosted Origin rejects by default
  */
 export function createEnvRuntime(config: EnvRuntimeConfig): EnvRuntime {
   const normalized = normalizeEnvConfig(config);
@@ -98,6 +103,18 @@ export function createEnvRuntime(config: EnvRuntimeConfig): EnvRuntime {
         `Unknown environment "${appEnv}".`,
       );
     }
+
+    if (
+      normalized.pinned
+      && normalized.pinnedEnvironment
+      && appEnv !== normalized.pinnedEnvironment
+    ) {
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        `This deploy is pinned to "${normalized.pinnedEnvironment}" and cannot serve "${appEnv}".`,
+      );
+    }
+
     return {
       appEnv,
       firestoreDatabaseId: process.env.FIRESTORE_EMULATOR_HOST
@@ -146,7 +163,21 @@ export function createEnvRuntime(config: EnvRuntimeConfig): EnvRuntime {
     }
   }
 
+  function throwForUnknownOrigin(reason: string): never {
+    throw new functions.https.HttpsError('failed-precondition', reason);
+  }
+
   function resolveHintedEnv(hint: AppEnvironment | null): AppEnvironment {
+    if (normalized.pinned && normalized.pinnedEnvironment) {
+      if (hint && hint !== normalized.pinnedEnvironment) {
+        throw new functions.https.HttpsError(
+          'failed-precondition',
+          `This deploy is pinned to "${normalized.pinnedEnvironment}" and cannot serve hint "${hint}".`,
+        );
+      }
+      return normalized.pinnedEnvironment;
+    }
+
     if (hint) {
       return hint;
     }
@@ -160,6 +191,8 @@ export function createEnvRuntime(config: EnvRuntimeConfig): EnvRuntime {
   function resolveRequestEnv(clientEnv: unknown, context: EnvRequestContext): RuntimeEnv {
     const origin = originFromContext(context);
     const hint = parseClientHint(clientEnv);
+    const emulator = isEmulatorRuntime();
+    const local = isLocalOrigin(origin);
 
     if (origin) {
       const mapped = normalized.originToEnv.get(origin);
@@ -169,10 +202,12 @@ export function createEnvRuntime(config: EnvRuntimeConfig): EnvRuntime {
       }
     }
 
-    const emulator = isEmulatorRuntime();
-    const local = isLocalOrigin(origin);
-
+    // Localhost / emulator / missing Origin → client hint / pinned / public.
     if (emulator || local || !origin) {
+      if (!origin && !emulator && !local && normalized.rejectUnknownOrigin) {
+        throwForUnknownOrigin('Missing Origin header for hosted request.');
+      }
+
       const appEnv = resolveHintedEnv(hint);
       if (!(emulator && normalized.allowEmulatorWithoutClaim)) {
         requireEnvAccess(appEnv, context);
@@ -180,7 +215,12 @@ export function createEnvRuntime(config: EnvRuntimeConfig): EnvRuntime {
       return buildEnv(appEnv);
     }
 
-    // Unknown hosted origin: do not trust client to pick a gated env.
+    // Unknown hosted Origin.
+    if (normalized.rejectUnknownOrigin) {
+      throwForUnknownOrigin(`Unrecognized Origin "${origin}".`);
+    }
+
+    // Do not trust client to pick a gated env on unknown hosted origins.
     const appEnv = hint && !normalized.environments[hint]?.requireClaim
       ? hint
       : normalized.publicEnvironment;
@@ -197,7 +237,17 @@ export function createEnvRuntime(config: EnvRuntimeConfig): EnvRuntime {
   }
 
   function getRuntimeEnv(): RuntimeEnv {
-    return storage.getStore() ?? resolveProcessEnv();
+    const store = storage.getStore();
+    if (store) {
+      return store;
+    }
+    if (normalized.requireRequestContext) {
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        'No active request environment. Call getDb()/getRuntimeEnv() inside a withAppEnv* wrapper, or pass an explicit env via runWithEnv().',
+      );
+    }
+    return resolveProcessEnv();
   }
 
   function getEnvTag(): AppEnvironment {
