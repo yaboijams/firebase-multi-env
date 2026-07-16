@@ -70,6 +70,8 @@ export type EnvRuntimeConfig<
   /**
    * When true, this deploy is bound to one env/SA; Origin confirms, never cross-selects.
    * When false/omitted, one runtime may serve many envs and Origin selects the DB.
+   * Unpinned is for local/dev only — deployed Cloud Functions require `pinned: true`
+   * unless `allowUnpinnedCloudDeploy` is set.
    * @default false
    */
   pinned?: boolean;
@@ -78,6 +80,12 @@ export type EnvRuntimeConfig<
    * Defaults to `process.env.APP_ENV` when omitted.
    */
   pinnedEnvironment?: keyof TEnvs & string;
+  /**
+   * Escape hatch: allow `pinned: false` on a real Cloud Functions / Cloud Run deploy.
+   * Production isolation expects pinned + per-env service accounts; leave this unset.
+   * @default false
+   */
+  allowUnpinnedCloudDeploy?: boolean;
   /**
    * When true, unknown or missing hosted Origin throws `failed-precondition`.
    * When false, fall back to `publicEnvironment` (legacy logical behavior).

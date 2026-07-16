@@ -1,0 +1,72 @@
+# Example: per-env GitHub Actions deploy (Workload Identity Federation)
+#
+# Copy to .github/workflows/deploy-multi-env.yml and fill in:
+#   PROJECT_ID, WIF providers, deployer service accounts
+#
+# Qual can deploy from PRs; production only from main.
+
+name: Deploy multi-env
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  doctor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci
+      - run: npx firebase-multi-env doctor --strict
+
+  deploy-qual:
+    needs: doctor
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: qual
+    env:
+      APP_ENV: qual
+      GOOGLE_CLOUD_PROJECT: ${{ vars.GCP_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER_QUAL }}
+          service_account: ${{ secrets.DEPLOY_SA_QUAL }}
+      - run: npx firebase-tools deploy --only functions:qual,hosting:qual --project "$GOOGLE_CLOUD_PROJECT"
+
+  deploy-prod:
+    needs: doctor
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      APP_ENV: production
+      GOOGLE_CLOUD_PROJECT: ${{ vars.GCP_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER_PROD }}
+          service_account: ${{ secrets.DEPLOY_SA_PROD }}
+      - run: npx firebase-tools deploy --only functions:prod,hosting:prod --project "$GOOGLE_CLOUD_PROJECT"

@@ -12,6 +12,7 @@ export type {
 export {
   normalizeEnvConfig,
   assertNoEmulatorEnvLeak,
+  assertPinnedOnCloudDeploy,
   isCloudDeployedRuntime,
   type NormalizedEnvConfig,
   type NormalizedEnvironment,

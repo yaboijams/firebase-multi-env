@@ -16,6 +16,7 @@ export type NormalizedEnvConfig = {
   accessDeniedMessage: string;
   pinned: boolean;
   pinnedEnvironment: string | null;
+  allowUnpinnedCloudDeploy: boolean;
   rejectUnknownOrigin: boolean;
   requireRequestContext: boolean;
   allowRefererFallback: boolean;
@@ -123,6 +124,25 @@ export function assertNoEmulatorEnvLeak(refuse: boolean): void {
   }
 }
 
+/**
+ * Deployed Cloud Functions must use pinned mode (one env + SA per process).
+ * Unpinned Origin→DB selection is for local/dev only.
+ */
+export function assertPinnedOnCloudDeploy(
+  pinned: boolean,
+  allowUnpinnedCloudDeploy: boolean,
+): void {
+  if (pinned || allowUnpinnedCloudDeploy || !isCloudDeployedRuntime()) {
+    return;
+  }
+
+  throw new Error(
+    'Unpinned createEnvRuntime() is not allowed on a deployed Cloud Function. '
+    + 'Set pinned: true with pinnedEnvironment / APP_ENV (and a per-env service account), '
+    + 'or set allowUnpinnedCloudDeploy: true only for intentional shared-runtime deploys.',
+  );
+}
+
 export function normalizeEnvConfig<
   TEnvs extends Record<string, EnvironmentDefinition>,
 >(
@@ -136,6 +156,9 @@ export function normalizeEnvConfig<
   }
 
   const pinned = config.pinned ?? false;
+  const allowUnpinnedCloudDeploy = config.allowUnpinnedCloudDeploy ?? false;
+  assertPinnedOnCloudDeploy(pinned, allowUnpinnedCloudDeploy);
+
   const publicEnvironment = resolvePublicEnvironment(
     config.environments as Record<string, EnvironmentDefinition>,
     config.publicEnvironment,
@@ -203,6 +226,7 @@ export function normalizeEnvConfig<
       ?? `Access denied for this environment. Ask an admin to run: npx firebase-multi-env grant-env <env> -- you@email.com (then sign out and back in).`,
     pinned,
     pinnedEnvironment,
+    allowUnpinnedCloudDeploy,
     rejectUnknownOrigin,
     requireRequestContext,
     allowRefererFallback,

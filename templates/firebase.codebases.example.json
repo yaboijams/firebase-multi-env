@@ -50,5 +50,15 @@
         { "source": "/api/**", "function": { "functionId": "api", "codebase": "qual" } }
       ]
     }
+  ],
+  "storage": [
+    {
+      "bucket": "myapp-prod.appspot.com",
+      "rules": "storage.prod.rules"
+    },
+    {
+      "bucket": "myapp-qual.appspot.com",
+      "rules": "storage.qual.rules"
+    }
   ]
 }
