@@ -1,0 +1,24 @@
+// Gated environment Cloud Storage rules.
+// Use a dedicated bucket per gated env (e.g. myapp-qual).
+// Do not share the production bucket with qual/cert.
+
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function hasEnvAccess(env) {
+      return isSignedIn()
+        && request.auth.token.allowedEnvs is list
+        && env in request.auth.token.allowedEnvs;
+    }
+
+    // Example: user uploads under their uid
+    match /users/{userId}/{allPaths=**} {
+      allow read, write: if hasEnvAccess('qual')
+        && request.auth.uid == userId;
+    }
+  }
+}

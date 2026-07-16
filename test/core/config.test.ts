@@ -189,4 +189,43 @@ describe('normalizeEnvConfig', () => {
       delete process.env.FIRESTORE_EMULATOR_HOST;
     }
   });
+
+  it('refuses unpinned config on a cloud deploy', () => {
+    process.env.K_SERVICE = 'apiShared';
+    try {
+      expect(() => normalizeEnvConfig(multiEnvConfig)).toThrow(
+        /Unpinned createEnvRuntime/,
+      );
+    } finally {
+      delete process.env.K_SERVICE;
+    }
+  });
+
+  it('allows unpinned cloud deploy with allowUnpinnedCloudDeploy', () => {
+    process.env.K_SERVICE = 'apiShared';
+    try {
+      const normalized = normalizeEnvConfig({
+        ...multiEnvConfig,
+        allowUnpinnedCloudDeploy: true,
+      });
+      expect(normalized.pinned).toBe(false);
+      expect(normalized.allowUnpinnedCloudDeploy).toBe(true);
+    } finally {
+      delete process.env.K_SERVICE;
+    }
+  });
+
+  it('allows pinned config on a cloud deploy', () => {
+    process.env.K_SERVICE = 'apiQual';
+    try {
+      const normalized = normalizeEnvConfig({
+        ...multiEnvConfig,
+        pinned: true,
+        pinnedEnvironment: 'qual',
+      });
+      expect(normalized.pinned).toBe(true);
+    } finally {
+      delete process.env.K_SERVICE;
+    }
+  });
 });

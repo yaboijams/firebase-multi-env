@@ -25,12 +25,18 @@ Do **not** open a public issue for unfixed vulnerabilities.
 
 ## Security assumptions
 
-This package hardens **request-local environment routing** inside one Firebase/GCP project. It does **not** replace:
+This package hardens **request-local environment routing** and **pinned deploy isolation** inside one Firebase/GCP project. Project-parity (shared Auth, AWS-style env roles) also requires your IAM, secrets, and CI — see `templates/PROJECT_PARITY.md`. It does **not** replace:
 
 - Per-environment service accounts / IAM
 - Secret Manager isolation
-- Separate Firebase projects (strongest blast-radius boundary)
-- Correct Firestore Security Rules
+- Separate Firebase projects (strongest blast-radius boundary for Auth/billing/admin)
+- Correct Firestore / Storage Security Rules
 - Secure CI/CD and deployer identities
 
 See [templates/THREAT_MODEL.md](./templates/THREAT_MODEL.md) for what is and is not covered.
+
+CI gate:
+
+```bash
+npx firebase-multi-env doctor --strict
+```

@@ -6,15 +6,17 @@
  *   npx firebase-multi-env grant-env qual --revoke you@example.com
  *   npx firebase-multi-env init
  *   npx firebase-multi-env doctor
+ *   npx firebase-multi-env doctor --strict
  *
  * grant-env requires Application Default Credentials:
  *   gcloud auth application-default login
  */
 
 import { createRequire } from 'node:module';
-import { copyFileSync, mkdirSync, existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { dirname, join, relative } from 'node:path';
+import { copyFileSync, mkdirSync, existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { printDoctorResult, runDoctor } from './lib/doctor.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const packageRoot = join(__dirname, '..');
@@ -24,13 +26,14 @@ function printHelp() {
   console.log(`Usage:
   firebase-multi-env grant-env <env> [--revoke] [--claim allowedEnvs] [--project <id>] <email>
   firebase-multi-env init [--dir <path>]
-  firebase-multi-env doctor [--dir <path>]
+  firebase-multi-env doctor [--dir <path>] [--strict]
 
 Examples:
   firebase-multi-env grant-env qual you@example.com
   firebase-multi-env grant-env cert --revoke you@example.com
   firebase-multi-env init
   firebase-multi-env doctor
+  firebase-multi-env doctor --strict
 `);
 }
 
@@ -141,12 +144,20 @@ function initProject(args) {
   const files = [
     { file: 'firestore.gated.rules.snippet', to: join(snippetsDir, 'firestore.gated.rules.snippet') },
     { file: 'firestore.public.rules.snippet', to: join(snippetsDir, 'firestore.public.rules.snippet') },
+    { file: 'storage.gated.rules.snippet', to: join(snippetsDir, 'storage.gated.rules.snippet') },
+    { file: 'storage.public.rules.snippet', to: join(snippetsDir, 'storage.public.rules.snippet') },
     { file: 'MULTI_ENV_SETUP.md', to: join(targetRoot, 'MULTI_ENV_SETUP.md') },
     { file: 'ISOLATION.md', to: join(isolationDir, 'ISOLATION.md') },
     { file: 'THREAT_MODEL.md', to: join(isolationDir, 'THREAT_MODEL.md') },
+    { file: 'PROJECT_PARITY.md', to: join(isolationDir, 'PROJECT_PARITY.md') },
     { file: 'iam-sa-per-env.md', to: join(isolationDir, 'iam-sa-per-env.md') },
+    { file: 'secrets-per-env.md', to: join(isolationDir, 'secrets-per-env.md') },
+    { file: 'deploy-isolation.md', to: join(isolationDir, 'deploy-isolation.md') },
     { file: 'functions.pinned.qual.example.ts', to: join(isolationDir, 'functions.pinned.qual.example.ts') },
     { file: 'firebase.codebases.example.json', to: join(isolationDir, 'firebase.codebases.example.json') },
+    { file: 'github-actions.deploy.example.yml', to: join(isolationDir, 'github-actions.deploy.example.yml') },
+    { file: 'storage.gated.rules.snippet', to: join(isolationDir, 'storage.gated.rules.snippet') },
+    { file: 'storage.public.rules.snippet', to: join(isolationDir, 'storage.public.rules.snippet') },
   ];
 
   for (const { file, to } of files) {
@@ -158,27 +169,9 @@ function initProject(args) {
     console.log(`Wrote ${to}`);
   }
 
-  console.log('\nDone. See MULTI_ENV_SETUP.md and multi-env/ISOLATION.md for next steps.');
-  console.log('Run: npx firebase-multi-env doctor');
-}
-
-function walkFiles(root, acc = []) {
-  if (!existsSync(root)) {
-    return acc;
-  }
-  for (const name of readdirSync(root)) {
-    if (name === 'node_modules' || name === 'dist' || name === '.git' || name === 'coverage') {
-      continue;
-    }
-    const full = join(root, name);
-    const st = statSync(full);
-    if (st.isDirectory()) {
-      walkFiles(full, acc);
-    } else if (/\.(m?[jt]sx?|cjs|mjs)$/.test(name)) {
-      acc.push(full);
-    }
-  }
-  return acc;
+  console.log('\nDone. Production path is pinned + per-env SA + secrets.');
+  console.log('See MULTI_ENV_SETUP.md and multi-env/PROJECT_PARITY.md.');
+  console.log('Run: npx firebase-multi-env doctor --strict');
 }
 
 function doctor(args) {
@@ -189,133 +182,10 @@ function doctor(args) {
     process.exit(1);
   }
 
-  const findings = [];
-  const files = walkFiles(targetRoot);
-  const contents = files.map((file) => {
-    try {
-      return { file, text: readFileSync(file, 'utf8') };
-    } catch {
-      return { file, text: '' };
-    }
-  });
-
-  const hasCreateEnv = contents.some(({ text }) => text.includes('createEnvRuntime'));
-  const hasPinned = contents.some(({ text }) =>
-    /pinned\s*:\s*true/.test(text),
-  );
-  const hasLogicalExplicit = contents.some(({ text }) =>
-    /pinned\s*:\s*false/.test(text),
-  );
-  const hasVerifyIdToken = contents.some(({ text }) =>
-    /verifyIdToken\s*:\s*true/.test(text),
-  );
-  const hasHttpWrapper = contents.some(({ text }) =>
-    text.includes('createWithAppEnvHttp'),
-  );
-  const hasServiceAccount = contents.some(({ text }) =>
-    /serviceAccount\s*:/.test(text),
-  );
-  const mentionsAppEnv = contents.some(({ text }) =>
-    text.includes('APP_ENV') || text.includes('pinnedEnvironment'),
-  );
-  const hasGetDb = contents.some(({ text }) => text.includes('createGetDb'));
-
-  console.log(`firebase-multi-env doctor (${relative(process.cwd(), targetRoot) || '.'})\n`);
-
-  if (!hasCreateEnv) {
-    findings.push({
-      level: 'warn',
-      message: 'No createEnvRuntime() usage found. Run init and wire Functions first.',
-    });
-  } else {
-    findings.push({
-      level: 'ok',
-      message: 'Found createEnvRuntime() usage.',
-    });
-  }
-
-  if (hasPinned) {
-    findings.push({
-      level: 'ok',
-      message: 'Pinned isolation mode detected (recommended for production deploys).',
-    });
-    if (!mentionsAppEnv) {
-      findings.push({
-        level: 'warn',
-        message: 'Pinned mode should set pinnedEnvironment or APP_ENV per deploy.',
-      });
-    } else {
-      findings.push({
-        level: 'ok',
-        message: 'Pinned env source (APP_ENV / pinnedEnvironment) referenced.',
-      });
-    }
-    if (!hasServiceAccount) {
-      findings.push({
-        level: 'warn',
-        message:
-          'No serviceAccount config found in scanned sources. Attach a per-env SA so IAM matches pinned mode.',
-      });
-    } else {
-      findings.push({
-        level: 'ok',
-        message: 'serviceAccount referenced in sources.',
-      });
-    }
-  } else if (hasCreateEnv) {
-    findings.push({
-      level: 'info',
-      message: hasLogicalExplicit
-        ? 'Unpinned mode (pinned: false) — Origin selects DB across envs in one runtime.'
-        : 'No pinned: true found — default is unpinned (shared runtime may open multiple DBs).',
-    });
-    findings.push({
-      level: 'info',
-      message:
-        'For hard separation in one project, use pinned: true + per-env service accounts. See multi-env/ISOLATION.md.',
-    });
-  }
-
-  if (hasHttpWrapper && !hasVerifyIdToken) {
-    findings.push({
-      level: 'warn',
-      message:
-        'createWithAppEnvHttp found without verifyIdToken: true. Raw onRequest does not populate req.auth by default.',
-    });
-  } else if (hasHttpWrapper) {
-    findings.push({
-      level: 'ok',
-      message: 'HTTP wrapper verifies ID tokens.',
-    });
-  }
-
-  if (hasGetDb) {
-    findings.push({
-      level: 'ok',
-      message: 'createGetDb() found — call it only inside withAppEnv* wrappers.',
-    });
-  }
-
-  if (!existsSync(join(targetRoot, 'MULTI_ENV_SETUP.md'))
-    && !existsSync(join(targetRoot, 'multi-env', 'ISOLATION.md'))) {
-    findings.push({
-      level: 'info',
-      message: 'Setup docs not found. Run: npx firebase-multi-env init',
-    });
-  }
-
-  for (const finding of findings) {
-    const tag = finding.level.toUpperCase().padEnd(4);
-    console.log(`[${tag}] ${finding.message}`);
-  }
-
-  const warnings = findings.filter((f) => f.level === 'warn').length;
-  console.log(
-    warnings
-      ? `\nDoctor finished with ${warnings} warning(s).`
-      : '\nDoctor finished with no warnings.',
-  );
-  process.exit(warnings ? 1 : 0);
+  const strict = args.includes('--strict');
+  const result = runDoctor({ targetRoot, strict, cwd: process.cwd() });
+  printDoctorResult(result);
+  process.exit(result.exitCode);
 }
 
 const [command, ...rest] = process.argv.slice(2);

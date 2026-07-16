@@ -2,22 +2,19 @@
 
 [![npm](https://img.shields.io/npm/v/firebase-multi-env.svg)](https://www.npmjs.com/package/firebase-multi-env)
 
-**Hardened single-project environment isolation** for Firebase: Origin → environment → Firestore database, with claim-based authorization for gated environments and optional **pinned** per-env deploys.
+**Hardened single-project environment isolation** for Firebase: Origin → environment → Firestore database, with claim-based authorization for gated environments and **pinned** per-env deploys as the production path.
 
 One Firebase project, multiple Firestore databases, multiple Hosting sites. Production users do not need special rights; gated envs (qual/cert/…) require an `allowedEnvs` claim.
 
-> This package does **not** replace separate Firebase projects. Prefer **pinned mode + per-env service accounts** when you want shared Auth and AWS-style role/env separation inside one project. Separate projects remain the strongest blast-radius boundary — see [Security model](#security-model) and `templates/THREAT_MODEL.md`.
+> **Production path:** pinned mode + per-env service accounts + secrets + deploy isolation (project-parity). Separate Firebase projects remain the strongest blast-radius boundary for billing/Auth/admin — see [Security model](#security-model) and `templates/PROJECT_PARITY.md`.
 
 ## Package layout
 
 ```text
-src/
-  core/        # types, config normalization, env runtime
-  server/      # getDb, getDbForEnv, auth guards
-  functions/   # callable v1/v2 + HTTP wrappers
-  client/      # callable, client Firestore, multi-env client kit
-templates/     # rules snippets, isolation + threat-model docs, pinned deploy examples
-bin/           # grant-env, init, doctor
+src/           # runtime, server, functions, client
+eslint/        # no-bare-admin-firestore, require-pinned-runtime
+templates/     # rules, IAM, secrets, deploy isolation, project parity
+bin/           # grant-env, init, doctor [--strict]
 ```
 
 Public imports:
@@ -29,6 +26,7 @@ Public imports:
 | `firebase-multi-env/functions-v2` | callable wrapper (v2) |
 | `firebase-multi-env/http` | `onRequest` / Express-style wrapper |
 | `firebase-multi-env/client` | callable + client Firestore kit |
+| `firebase-multi-env/eslint` | ESLint plugin (forbid bare Admin Firestore / require pinned) |
 
 ## Install
 
@@ -56,22 +54,22 @@ npm link firebase-multi-env
 
 Client `appEnv` is only a **hint** on localhost. Hosted Origin always wins when recognized.
 
-This is **logical request routing** plus optional **pinned deploy isolation**. It is not a cryptographic Hosting lock and not a substitute for IAM between databases.
+This is **request routing** plus **pinned deploy isolation**. Pair with IAM, secrets, and CI for project-parity. It is not a cryptographic Hosting lock.
 
-**Protects against:** client `appEnv` overrides, accidental dynamic DB selection, ungated non-prod access, wrong Origin on a pinned runtime, silent `getDb()` outside request context (when configured), leaked emulator env vars on pinned deploys.
+**Protects against:** client `appEnv` overrides, accidental dynamic DB selection, ungated non-prod access, wrong Origin on a pinned runtime, unpinned Cloud deploys (startup assert), silent `getDb()` outside request context (when configured), leaked emulator env vars on pinned deploys, bare Admin Firestore (ESLint + doctor).
 
-**Does not automatically protect against:** overly broad service accounts, direct Admin SDK bypasses, shared secrets, bad IAM/CI, or shared-project blast radius.
+**Does not automatically protect against:** overly broad service accounts, shared secrets, bad IAM/CI, or shared-project Auth/billing blast radius — close those with the templates under `multi-env/` after `init`.
 
 Full matrix: [`SECURITY.md`](./SECURITY.md) and [`templates/THREAT_MODEL.md`](./templates/THREAT_MODEL.md).
 
-## Isolation (`pinned`) — recommended for production
+## Isolation (`pinned`) — required for production
 
 | `pinned` | Deploy shape | What Origin does |
 |---|---|---|
-| `false` (default) | One Functions runtime may serve many envs | **Selects** which DB (mainly for local/dev) |
+| `false` (default) | One process may serve many envs | **Selects** which DB (**local/dev only**) |
 | `true` | One deploy (+ SA) per env | **Confirms** the pinned env |
 
-**Pinned** is the recommended production posture inside one GCP project:
+Deployed Cloud Functions **reject unpinned** config at startup unless `allowUnpinnedCloudDeploy: true`.
 
 ```ts
 export const appEnvRuntime = createEnvRuntime({
@@ -90,12 +88,14 @@ Pinned defaults:
 - Emulator host env vars on a real deploy → **refuse**
 - Runtime refuses to serve any env other than the pinned one
 
-Pair with a dedicated service account per env (do **not** run these Functions as the project default SA). Templates:
+Project-parity stack (via `init`):
 
-- `multi-env/ISOLATION.md` (via `init`)
-- `multi-env/THREAT_MODEL.md`
+- `multi-env/PROJECT_PARITY.md`
 - `multi-env/iam-sa-per-env.md`
-- `multi-env/functions.pinned.qual.example.ts`
+- `multi-env/secrets-per-env.md`
+- `multi-env/deploy-isolation.md`
+- `multi-env/github-actions.deploy.example.yml`
+- Storage + Firestore rules snippets
 
 Scripts and background jobs should use an explicit DB accessor (never rely on silent defaults):
 
@@ -109,11 +109,11 @@ export const getDbForEnv = createGetDbForEnv(appEnvRuntime);
 const db = getDbForEnv('qual');
 ```
 
-Optional hardening without pinning:
+Optional local hardening without pinning (not for Cloud deploys):
 
 ```ts
 createEnvRuntime({
-  pinned: false, // default — prefer pinned for production
+  pinned: false, // local/emulator only — blocked on Cloud unless allowUnpinnedCloudDeploy
   rejectUnknownOrigin: true,
   requireRequestContext: true,
   allowRefererFallback: false,
@@ -125,15 +125,30 @@ createEnvRuntime({
 
 ```bash
 npx firebase-multi-env init
-npx firebase-multi-env doctor
+npx firebase-multi-env doctor --strict
 ```
 
 Writes:
 
-- `firestore.rules.snippets/` (gated + public templates)
+- `firestore.rules.snippets/` (Firestore + Storage, gated + public)
 - `MULTI_ENV_SETUP.md`
-- `multi-env/` isolation docs + pinned deploy examples
+- `multi-env/` — project parity, IAM, secrets, deploy isolation, pinned examples, CI workflow
 
+### ESLint guardrails
+
+```js
+import multiEnv from 'firebase-multi-env/eslint';
+
+export default [
+  {
+    plugins: { 'firebase-multi-env': multiEnv },
+    rules: {
+      'firebase-multi-env/no-bare-admin-firestore': 'error',
+      'firebase-multi-env/require-pinned-runtime': 'error',
+    },
+  },
+];
+```
 ## One-time Firebase setup
 
 ```bash
@@ -178,6 +193,8 @@ import {
 import { createWithAppEnvV1 } from 'firebase-multi-env/functions-v1';
 
 export const appEnvRuntime = createEnvRuntime({
+  pinned: true,
+  pinnedEnvironment: process.env.APP_ENV,
   environments: {
     production: {
       database: '(default)',
@@ -266,7 +283,7 @@ npx firebase-multi-env grant-env qual --revoke --project my-project you@email.co
 ## What this package covers
 
 - Origin → environment → Firestore database routing
-- `pinned` / unpinned routing modes (pinned recommended for production)
+- **Pinned production path** (unpinned blocked on Cloud deploys by default)
 - Gated-env allowlist claims for Functions (callable + HTTP)
 - Hardened Origin parsing (no multi-value / `null` / non-http schemes)
 - Optional Referer fallback (off by default when pinned)
@@ -276,11 +293,12 @@ npx firebase-multi-env grant-env qual --revoke --project my-project you@email.co
 - Optional HTTP ID token verification
 - Client callable + Firestore helpers
 - Server guards (`requireAuth`, `requireOwner`, `requireClaim`)
-- Rules templates + `init` / `doctor` scaffolding
+- Rules templates (Firestore + Storage) + `init` / `doctor --strict`
+- ESLint plugin (`no-bare-admin-firestore`, `require-pinned-runtime`)
 - CLI grant/revoke for `allowedEnvs`
-- Docs/templates for per-env service accounts and threat model
+- Templates for per-env SAs, secrets, deploy isolation, project-parity checklist
 
-Still app-owned: Auth UI/sign-in flows, domain-specific RBAC, IAM bindings, org policies, and full product security rules beyond the templates.
+Still app-owned: Auth UI/sign-in flows, domain-specific RBAC, live IAM bindings, org policies, and full product security rules beyond the templates.
 
 ## Releasing
 
