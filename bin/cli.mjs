@@ -7,6 +7,7 @@
  *   npx firebase-multi-env init
  *   npx firebase-multi-env doctor
  *   npx firebase-multi-env doctor --strict
+ *   npx firebase-multi-env provision --project my-app --envs production,qual
  *
  * grant-env requires Application Default Credentials:
  *   gcloud auth application-default login
@@ -17,6 +18,7 @@ import { copyFileSync, mkdirSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { printDoctorResult, runDoctor } from './lib/doctor.mjs';
+import { buildProvisionFiles, parseProvisionArgs } from './lib/provision.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const packageRoot = join(__dirname, '..');
@@ -27,6 +29,7 @@ function printHelp() {
   firebase-multi-env grant-env <env> [--revoke] [--claim allowedEnvs] [--project <id>] <email>
   firebase-multi-env init [--dir <path>]
   firebase-multi-env doctor [--dir <path>] [--strict]
+  firebase-multi-env provision --project <id> --envs <list> [options]
 
 Examples:
   firebase-multi-env grant-env qual you@example.com
@@ -34,6 +37,16 @@ Examples:
   firebase-multi-env init
   firebase-multi-env doctor
   firebase-multi-env doctor --strict
+  firebase-multi-env provision --project my-app --envs production,qual
+  firebase-multi-env provision --project my-app --envs production:(default),qual:qual-env --secrets STRIPE_SECRET,SENDGRID --print
+
+Provision options:
+  --project <id>       GCP / Firebase project (or GCLOUD_PROJECT)
+  --envs <list>        Comma-separated envs; optional db id via name:db-id
+  --secrets <list>     Secret base names (default: STRIPE_SECRET) → BASE_<ENV>
+  --location <region>  Default us-central1 (buckets / Firestore create hints)
+  --dir <path>         Output directory (default: multi-env/provision)
+  --print              Print scripts to stdout; do not write files
 `);
 }
 
@@ -153,6 +166,7 @@ function initProject(args) {
     { file: 'iam-sa-per-env.md', to: join(isolationDir, 'iam-sa-per-env.md') },
     { file: 'secrets-per-env.md', to: join(isolationDir, 'secrets-per-env.md') },
     { file: 'deploy-isolation.md', to: join(isolationDir, 'deploy-isolation.md') },
+    { file: 'PROVISION.md', to: join(isolationDir, 'PROVISION.md') },
     { file: 'functions.pinned.qual.example.ts', to: join(isolationDir, 'functions.pinned.qual.example.ts') },
     { file: 'firebase.codebases.example.json', to: join(isolationDir, 'firebase.codebases.example.json') },
     { file: 'github-actions.deploy.example.yml', to: join(isolationDir, 'github-actions.deploy.example.yml') },
@@ -171,7 +185,31 @@ function initProject(args) {
 
   console.log('\nDone. Production path is pinned + per-env SA + secrets.');
   console.log('See MULTI_ENV_SETUP.md and multi-env/PROJECT_PARITY.md.');
+  console.log('Generate IAM scripts: npx firebase-multi-env provision --project <id> --envs production,qual');
   console.log('Run: npx firebase-multi-env doctor --strict');
+}
+
+function provision(args) {
+  const opts = parseProvisionArgs(args);
+  const result = buildProvisionFiles(opts);
+
+  if (opts.printOnly) {
+    for (const file of result.files) {
+      console.log(`\n===== ${file.path} =====\n`);
+      console.log(file.content);
+    }
+    return;
+  }
+
+  for (const file of result.files) {
+    console.log(`Wrote ${file.path}`);
+  }
+
+  console.log(`\nGenerated provision scripts for ${result.envs.map((e) => e.name).join(', ')}.`);
+  console.log('Review, then run e.g.:');
+  console.log(`  bash ${join(result.outDir, 'provision.all.sh')}`);
+  console.log('Auth stays shared — gate with: npx firebase-multi-env grant-env <env> --project ... you@email.com');
+  console.log('See multi-env/PROVISION.md');
 }
 
 function doctor(args) {
@@ -215,6 +253,13 @@ if (command === 'grant-env') {
     doctor(rest);
   } catch (error) {
     console.error('Doctor failed.', error);
+    process.exit(1);
+  }
+} else if (command === 'provision') {
+  try {
+    provision(rest);
+  } catch (error) {
+    console.error('Provision failed.', error instanceof Error ? error.message : error);
     process.exit(1);
   }
 } else {

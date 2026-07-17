@@ -7,6 +7,15 @@ Pair with `pinned: true`, `secrets-per-env.md`, and `deploy-isolation.md`.
 
 ## 1. Create service accounts
 
+Prefer generating scripts (review, then run):
+
+```bash
+npx firebase-multi-env provision --project "$PROJECT_ID" --envs production,qual
+bash multi-env/provision/provision.all.sh
+```
+
+See `PROVISION.md`. Manual equivalent:
+
 ```bash
 PROJECT_ID=your-project-id
 

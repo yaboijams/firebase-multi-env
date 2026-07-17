@@ -20,11 +20,21 @@ Read in order:
 
 1. `multi-env/PROJECT_PARITY.md` — checklist + CI gate
 2. `multi-env/ISOLATION.md` — pinned vs logical
-3. `multi-env/iam-sa-per-env.md` — runtime SAs
-4. `multi-env/secrets-per-env.md` — Secret Manager
-5. `multi-env/deploy-isolation.md` — CI / WIF / Hosting
+3. `multi-env/PROVISION.md` — generate per-env SA / bucket / secret scripts
+4. `multi-env/iam-sa-per-env.md` — runtime SAs
+5. `multi-env/secrets-per-env.md` — Secret Manager
+6. `multi-env/deploy-isolation.md` — CI / WIF / Hosting
 
 Also see `functions.pinned.qual.example.ts`, `firebase.codebases.example.json`, and `github-actions.deploy.example.yml`.
+
+Generate IAM scripts (does not call GCP until you run them):
+
+```bash
+npx firebase-multi-env provision --project YOUR_PROJECT --envs production,qual
+bash multi-env/provision/provision.all.sh
+```
+
+Auth stays **shared**; gate non-prod with `grant-env` claims.
 
 | Mode | When | Config |
 |---|---|---|

@@ -14,7 +14,7 @@ One Firebase project, multiple Firestore databases, multiple Hosting sites. Prod
 src/           # runtime, server, functions, client
 eslint/        # no-bare-admin-firestore, require-pinned-runtime
 templates/     # rules, IAM, secrets, deploy isolation, project parity
-bin/           # grant-env, init, doctor [--strict]
+bin/           # grant-env, init, doctor [--strict], provision
 ```
 
 Public imports:
@@ -125,6 +125,7 @@ createEnvRuntime({
 
 ```bash
 npx firebase-multi-env init
+npx firebase-multi-env provision --project my-app --envs production,qual
 npx firebase-multi-env doctor --strict
 ```
 
@@ -133,7 +134,7 @@ Writes:
 - `firestore.rules.snippets/` (Firestore + Storage, gated + public)
 - `MULTI_ENV_SETUP.md`
 - `multi-env/` — project parity, IAM, secrets, deploy isolation, pinned examples, CI workflow
-
+- `multi-env/provision/` — generated gcloud scripts (via `provision`)
 ### ESLint guardrails
 
 ```js
@@ -270,6 +271,8 @@ Or use `createCallable` / `createGetClientFirestore` individually.
 
 ## Grant environment access
 
+Auth is **shared** in one Firebase project. Non-prod access uses `allowedEnvs` claims:
+
 ```bash
 gcloud auth application-default login
 npx firebase-multi-env grant-env qual --project my-project you@email.com
@@ -280,6 +283,16 @@ npx firebase-multi-env grant-env cert --project my-project you@email.com
 npx firebase-multi-env grant-env qual --revoke --project my-project you@email.com
 ```
 
+## Provision per-env IAM (scripts only)
+
+Generate reviewable `gcloud` scripts for runtime SAs, Storage buckets, and secret accessors:
+
+```bash
+npx firebase-multi-env provision --project my-project --envs production,qual,cert
+bash multi-env/provision/provision.all.sh
+```
+
+See `templates/PROVISION.md`. Scripts do not call GCP until you run them.
 ## What this package covers
 
 - Origin → environment → Firestore database routing
@@ -295,7 +308,8 @@ npx firebase-multi-env grant-env qual --revoke --project my-project you@email.co
 - Server guards (`requireAuth`, `requireOwner`, `requireClaim`)
 - Rules templates (Firestore + Storage) + `init` / `doctor --strict`
 - ESLint plugin (`no-bare-admin-firestore`, `require-pinned-runtime`)
-- CLI grant/revoke for `allowedEnvs`
+- CLI grant/revoke for `allowedEnvs` (shared Auth + claims)
+- CLI `provision` — generate per-env SA / bucket / secret gcloud scripts
 - Templates for per-env SAs, secrets, deploy isolation, project-parity checklist
 
 Still app-owned: Auth UI/sign-in flows, domain-specific RBAC, live IAM bindings, org policies, and full product security rules beyond the templates.

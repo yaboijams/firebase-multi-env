@@ -31,12 +31,13 @@ export default [
 
 - [ ] **Pinned Functions** — `createEnvRuntime({ pinned: true, pinnedEnvironment: process.env.APP_ENV, ... })`
 - [ ] **One Functions deploy (codebase) per env** — see `firebase.codebases.example.json`
-- [ ] **One runtime service account per env** — see `iam-sa-per-env.md`
+- [ ] **One runtime service account per env** — generate with `npx firebase-multi-env provision` (see `PROVISION.md` / `iam-sa-per-env.md`)
 - [ ] **Hosting target per env** rewrites only to that env’s codebase
-- [ ] **Per-env secrets** — Secret Manager + SA bindings; no shared `STRIPE_SECRET` — see `secrets-per-env.md`
+- [ ] **Per-env secrets** — Secret Manager + SA bindings; no shared `STRIPE_SECRET` — see `secrets-per-env.md` / `provision`
 - [ ] **Deploy isolation** — separate CI jobs / WIF identities; prod deployer cannot deploy qual — see `deploy-isolation.md`
 - [ ] **Firestore rules per database** — gated DBs check `allowedEnvs`; prod does not
-- [ ] **Storage bucket per env** — see `storage.gated.rules.snippet`
+- [ ] **Storage bucket per env** — provision scripts + `storage.gated.rules.snippet`
+- [ ] **Shared Auth + claims** — gate non-prod with `grant-env` (`allowedEnvs`); not separate Auth pools
 - [ ] **No bare `admin.firestore()`** — only `getDb()` / `getDbForEnv()`
 - [ ] **HTTP handlers** use `verifyIdToken: true`
 - [ ] **Jobs/scripts** use `getDbForEnv('qual')`, never silent `getDb()` outside request context

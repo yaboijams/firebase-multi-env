@@ -187,6 +187,11 @@ export function runDoctor({ targetRoot, strict = false, cwd = process.cwd() }) {
 
   const hasSecretsDoc = existsSync(join(targetRoot, 'multi-env', 'secrets-per-env.md'))
     || allText.some(({ text }) => /Secret Manager|defineSecret|secrets\s*:/.test(text));
+  const hasProvisionScripts = existsSync(join(targetRoot, 'multi-env', 'provision'))
+    || allText.some(({ file, text }) =>
+      /provision\.[a-z0-9_-]+\.sh$/i.test(file.replace(/\\/g, '/'))
+      || /firebase-multi-env provision|gcloud iam service-accounts create/.test(text),
+    );
   const hasDeployIsolationDoc = existsSync(join(targetRoot, 'multi-env', 'deploy-isolation.md'))
     || allText.some(({ text }) =>
       /workload.?identity|WIF|github-actions\.deploy|APP_ENV=/.test(text),
@@ -394,35 +399,39 @@ export function runDoctor({ targetRoot, strict = false, cwd = process.cwd() }) {
       });
     }
 
-    if (hasSecretsDoc) {
+    if (hasSecretsDoc || hasProvisionScripts) {
       findings.push({
         level: 'ok',
         code: 'secrets',
-        message: 'Per-env secrets guidance or Secret Manager usage detected.',
+        message: hasProvisionScripts
+          ? 'Provision scripts / Secret Manager guidance detected.'
+          : 'Per-env secrets guidance or Secret Manager usage detected.',
       });
     } else {
       findings.push({
         level: 'error',
         code: 'secrets',
         message:
-          'No per-env secrets docs/usage found. Run init and bind secrets per SA (multi-env/secrets-per-env.md).',
+          'No per-env secrets docs/usage found. Run: npx firebase-multi-env provision --project <id> --envs ... (or init + secrets-per-env.md).',
       });
     }
 
-    if (hasDeployIsolationDoc || hasCiWorkflow) {
+    if (hasDeployIsolationDoc || hasCiWorkflow || hasProvisionScripts) {
       findings.push({
         level: 'ok',
         code: 'deploy-isolation',
         message: hasCiWorkflow
           ? 'CI / deploy workflow with APP_ENV or firebase deploy detected.'
-          : 'Deploy isolation docs present.',
+          : hasProvisionScripts
+            ? 'Provision scripts present (per-env SA / bucket generation).'
+            : 'Deploy isolation docs present.',
       });
     } else {
       findings.push({
         level: 'error',
         code: 'deploy-isolation',
         message:
-          'No deploy isolation / CI matrix found. See multi-env/deploy-isolation.md and github-actions.deploy.example.yml.',
+          'No deploy isolation / CI / provision scripts found. See multi-env/deploy-isolation.md or run provision.',
       });
     }
 
