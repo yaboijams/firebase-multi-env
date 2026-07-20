@@ -1,0 +1,19 @@
+# Reports last touch to the web-portfolio store (Firestore via Cloud Function).
+name: Report last touch
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  track:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report to Cloud Function (production)
+        uses: yaboijams/repo-tracking@v0.2.0
+        with:
+          project-id: firebase-multi-env
+          mode: http
+          http-url: https://us-central1-web-portfolio-37083.cloudfunctions.net/repoTracking
+          secret: ${{ secrets.REPO_TRACKING_SECRET }}
