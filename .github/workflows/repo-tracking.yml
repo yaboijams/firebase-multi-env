@@ -1,4 +1,4 @@
-# Reports last touch to the web-portfolio store (Firestore via Cloud Function).
+# Reports last touch + published version to the web-portfolio store.
 name: Report last touch
 
 on:
@@ -10,10 +10,25 @@ jobs:
   track:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v5
+
+      - name: Resolve published version
+        id: ver
+        run: |
+          NAME=$(node -p "require('./package.json').name")
+          LOCAL=$(node -p "require('./package.json').version")
+          if [ "$LOCAL" != "0.0.0-development" ]; then
+            echo "version=$LOCAL" >> "$GITHUB_OUTPUT"
+          else
+            PUBLISHED=$(npm view "$NAME" version 2>/dev/null || true)
+            echo "version=$PUBLISHED" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Report to Cloud Function (production)
-        uses: yaboijams/repo-tracking@v0.2.0
+        uses: yaboijams/repo-tracking@v0.3.0
         with:
           project-id: firebase-multi-env
           mode: http
           http-url: https://us-central1-web-portfolio-37083.cloudfunctions.net/repoTracking
           secret: ${{ secrets.REPO_TRACKING_SECRET }}
+          version: ${{ steps.ver.outputs.version }}
