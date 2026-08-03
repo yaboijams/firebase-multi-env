@@ -1,11 +1,14 @@
 /**
  * Example: pinned qual Functions deploy.
  *
- * Copy into your functions package and deploy with:
- *   APP_ENV=qual
- *   serviceAccount: fn-qual@PROJECT_ID.iam.gserviceaccount.com
+ * Same source is deployed under firebase.json codebase `qual` with `"prefix": "qual"`.
+ * Export names stay unprefixed in code (`syncData`, `api`); the CLI deploys
+ * `qual-syncData` / `qual-api`. Production uses codebase `prod` + `"prefix": "prod"`.
  *
- * Production gets a sibling file / codebase with APP_ENV=production and fn-prod.
+ * Deploy with:
+ *   APP_ENV=qual
+ *   firebase deploy --only functions:qual
+ *   serviceAccount: fn-qual@PROJECT_ID.iam.gserviceaccount.com
  */
 
 import { onCall } from 'firebase-functions/v2/https';

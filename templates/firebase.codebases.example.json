@@ -1,9 +1,11 @@
 {
-  "comment": "Example multi-codebase layout. Adjust paths to your monorepo. Each codebase deploys with its own APP_ENV and runtime service account.",
+  "comment": "Same source, one codebase per env. Firebase joins prefix as `${prefix}-${exportName}` (qual + syncData → qual-syncData). Hosting rewrites must use the prefixed functionId. Pair with APP_ENV + per-env serviceAccount on deploy.",
   "functions": [
     {
       "source": "functions",
       "codebase": "prod",
+      "prefix": "prod",
+      "configDir": "functions/config/prod",
       "ignore": [
         "node_modules",
         ".git",
@@ -13,13 +15,16 @@
       ]
     },
     {
-      "source": "functions-qual",
+      "source": "functions",
       "codebase": "qual",
+      "prefix": "qual",
+      "configDir": "functions/config/qual",
       "ignore": [
         "node_modules",
         ".git",
         "firebase-debug.log",
-        "firebase-debug.*.log"
+        "firebase-debug.*.log",
+        "**/functions.pinned.qual.example.ts"
       ]
     }
   ],
@@ -40,14 +45,20 @@
       "target": "prod",
       "public": "dist",
       "rewrites": [
-        { "source": "/api/**", "function": { "functionId": "api", "codebase": "prod" } }
+        {
+          "source": "/api/**",
+          "function": { "functionId": "prod-api", "codebase": "prod" }
+        }
       ]
     },
     {
       "target": "qual",
       "public": "dist",
       "rewrites": [
-        { "source": "/api/**", "function": { "functionId": "api", "codebase": "qual" } }
+        {
+          "source": "/api/**",
+          "function": { "functionId": "qual-api", "codebase": "qual" }
+        }
       ]
     }
   ],

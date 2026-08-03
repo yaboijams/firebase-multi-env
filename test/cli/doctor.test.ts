@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   hasBareAdminFirestore,
   fileHasUnpinnedRuntime,
+  inspectFunctionPrefixes,
+  parseFunctionsConfigs,
   runDoctor,
 } from '../../bin/lib/doctor.mjs';
 
@@ -36,6 +38,29 @@ describe('doctor helpers', () => {
         createEnvRuntime({ pinned: true, environments: {} });
       `),
     ).toBe(false);
+  });
+
+  it('parses functions configs and flags missing prefixes', () => {
+    expect(
+      parseFunctionsConfigs({
+        functions: [
+          { source: 'functions', codebase: 'prod', prefix: 'prod' },
+          { source: 'functions', codebase: 'qual' },
+        ],
+      }),
+    ).toHaveLength(2);
+
+    const findings = inspectFunctionPrefixes(
+      '/nonexistent',
+      [
+        {
+          file: 'firebase.codebases.example.json',
+          text: '"codebase": "qual"',
+        },
+      ],
+      true,
+    );
+    expect(findings.some((f) => f.code === 'function-prefix')).toBe(true);
   });
 });
 
@@ -80,6 +105,7 @@ describe('runDoctor', () => {
       'functions/index.ts': `
         import { createEnvRuntime, createGetDb, createGetDbForEnv } from 'firebase-multi-env/server';
         import { createWithAppEnvHttp } from 'firebase-multi-env/http';
+        import { createMultiEnvClient } from 'firebase-multi-env/client';
         export const appEnvRuntime = createEnvRuntime({
           pinned: true,
           pinnedEnvironment: process.env.APP_ENV,
@@ -93,7 +119,20 @@ describe('runDoctor', () => {
         export const getDbForEnv = createGetDbForEnv(appEnvRuntime);
         export const withHttp = createWithAppEnvHttp(appEnvRuntime, { verifyIdToken: true });
         export const opts = { serviceAccount: 'fn-qual@x.iam.gserviceaccount.com' };
+        export const client = createMultiEnvClient({
+          app: {},
+          functions: {},
+          appEnv: 'qual',
+          prefixes: { production: 'prod', qual: 'qual' },
+          databases: { production: '(default)', qual: 'qual-env' },
+        });
       `,
+      'firebase.json': JSON.stringify({
+        functions: [
+          { source: 'functions', codebase: 'prod', prefix: 'prod' },
+          { source: 'functions', codebase: 'qual', prefix: 'qual' },
+        ],
+      }),
       'multi-env/PROJECT_PARITY.md': '# parity',
       'multi-env/secrets-per-env.md': '# secrets Secret Manager',
       'multi-env/deploy-isolation.md': '# WIF deploy',
@@ -107,6 +146,43 @@ describe('runDoctor', () => {
     );
     expect(failures).toEqual([]);
     expect(result.exitCode).toBe(0);
+  });
+
+  it('fails strict when multi-codebase firebase.json lacks prefixes', () => {
+    const dir = fixture({
+      'functions/index.ts': `
+        import { createEnvRuntime, createGetDb, createGetDbForEnv } from 'firebase-multi-env/server';
+        export const appEnvRuntime = createEnvRuntime({
+          pinned: true,
+          pinnedEnvironment: process.env.APP_ENV,
+          onResolveEnv: () => {},
+          environments: {
+            production: { database: '(default)', origins: ['https://x.web.app'] },
+            qual: { database: 'qual-env', origins: ['https://q.web.app'], requireClaim: true },
+          },
+        });
+        export const getDb = createGetDb(appEnvRuntime);
+        export const getDbForEnv = createGetDbForEnv(appEnvRuntime);
+        export const opts = { serviceAccount: 'fn-qual@x.iam.gserviceaccount.com' };
+      `,
+      'firebase.json': JSON.stringify({
+        functions: [
+          { source: 'functions', codebase: 'prod' },
+          { source: 'functions', codebase: 'qual' },
+        ],
+      }),
+      'multi-env/PROJECT_PARITY.md': '# parity',
+      'multi-env/secrets-per-env.md': '# secrets Secret Manager',
+      'multi-env/deploy-isolation.md': '# WIF deploy',
+      'multi-env/storage.gated.rules.snippet': 'match /b/{bucket}/o {}',
+      '.github/workflows/deploy.yml': 'APP_ENV=qual\nfirebase deploy',
+    });
+
+    const result = runDoctor({ targetRoot: dir, strict: true });
+    expect(result.findings.some((f) => f.code === 'function-prefix' && f.level === 'error')).toBe(
+      true,
+    );
+    expect(result.exitCode).toBe(1);
   });
 
   it('fails strict on bare admin firestore', () => {

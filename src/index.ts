@@ -21,4 +21,11 @@ export {
   createCallable,
   createGetClientFirestore,
   createMultiEnvClient,
+  resolveFunctionId,
+  isValidFunctionPrefix,
+} from './client/index.js';
+export type {
+  CreateCallableOptions,
+  CreateMultiEnvClientOptions,
+  FunctionPrefixOptions,
 } from './client/index.js';

@@ -4,13 +4,33 @@ Pinned mode only helps if **deployers** cannot cross-wire environments.
 
 ## Principles
 
-1. **One Hosting target → one Functions codebase → one runtime SA → one Firestore DB**
+1. **One Hosting target → one Functions codebase (+ `prefix`) → one runtime SA → one Firestore DB**
 2. **Prod CI identity cannot deploy qual** (and vice versa preferred)
 3. **Runtime SA ≠ deployer SA**
+4. **Function IDs must be unique in the project** — use firebase.json `prefix` so the same source can deploy `qual-api` and `prod-api`
+
+## Function prefixes (required for same-source multi-env)
+
+Firebase rejects duplicate function IDs across codebases. Set a per-codebase `prefix`; the CLI deploys `${prefix}-${exportName}`:
+
+```json
+{
+  "functions": [
+    { "source": "functions", "codebase": "prod", "prefix": "prod", "configDir": "functions/config/prod" },
+    { "source": "functions", "codebase": "qual", "prefix": "qual", "configDir": "functions/config/qual" }
+  ]
+}
+```
+
+Export `api` / `syncData` once in source → deployed as `qual-api`, `prod-syncData`, etc.
+
+Client builds must call the prefixed name (or use `createCallable` / `createMultiEnvClient` with `prefixes`).
+
+Secret Manager secret *resource* names used via `defineSecret` are also prefixed by the CLI (`qual-STRIPE_SECRET`). Keep that in sync with `secrets-per-env.md`.
 
 ## Hosting rewrites
 
-See `firebase.codebases.example.json`. Each site must rewrite API traffic only to its codebase:
+See `firebase.codebases.example.json`. Each site must rewrite API traffic only to its **prefixed** functionId + codebase:
 
 ```json
 {
@@ -19,7 +39,7 @@ See `firebase.codebases.example.json`. Each site must rewrite API traffic only t
       "target": "qual",
       "public": "dist",
       "rewrites": [
-        { "source": "/api/**", "function": { "functionId": "api", "codebase": "qual" } }
+        { "source": "/api/**", "function": { "functionId": "qual-api", "codebase": "qual" } }
       ]
     }
   ]
@@ -60,6 +80,9 @@ APP_ENV=production firebase deploy --only functions:prod,hosting:prod
 ## Checklist
 
 - [ ] Separate deployer SAs (or at least prod deployer cannot touch qual codebase)
+- [ ] Each functions codebase has a unique `prefix` (same source + different prefixes is OK)
+- [ ] Hosting rewrites use prefixed `functionId` values (`qual-api`, not `api`)
+- [ ] Client `prefixes` / `functionPrefix` match firebase.json
 - [ ] Branch protection on production deploy workflow
 - [ ] `doctor --strict` runs before deploy
 - [ ] Runtime `serviceAccount` on each function matches `APP_ENV`
