@@ -39,12 +39,21 @@ Never grant `fn-qual` access to `*_PROD` secrets.
 
 ## Wire in Functions (v2)
 
+When using firebase.json `prefix` (recommended), the CLI also prefixes secret **resource**
+names referenced by that codebase (`defineSecret('STRIPE_SECRET')` under `prefix: "qual"`
+expects Secret Manager secret `qual-STRIPE_SECRET`). Prefer either:
+
+1. **Same logical name + CLI prefix** — `defineSecret('STRIPE_SECRET')` + create `qual-STRIPE_SECRET` / `prod-STRIPE_SECRET`, or
+2. **Explicit env-suffixed names without relying on CLI prefix** — `defineSecret('STRIPE_SECRET_QUAL')` and create that exact secret (works if you avoid secret prefixing collisions carefully).
+
+Option 1 matches Firebase’s same-source multi-codebase model:
+
 ```ts
 import { defineSecret } from 'firebase-functions/params';
 import { onCall } from 'firebase-functions/v2/https';
 
-// Deploy-specific: qual codebase only references QUAL secrets
-const stripeSecret = defineSecret('STRIPE_SECRET_QUAL');
+// Logical name; with firebase.json prefix "qual" the CLI binds qual-STRIPE_SECRET
+const stripeSecret = defineSecret('STRIPE_SECRET');
 
 export const checkout = onCall(
   {
@@ -58,11 +67,13 @@ export const checkout = onCall(
 );
 ```
 
-Production codebase uses `STRIPE_SECRET_PROD` the same way.
+Create Secret Manager secrets as `qual-STRIPE_SECRET` / `prod-STRIPE_SECRET` (or keep
+explicit `*_QUAL` / `*_PROD` names if you are not using CLI secret prefixing).
 
 ## Checklist
 
-- [ ] Secret names are env-suffixed (or entirely separate)
+- [ ] Secret names are env-isolated (CLI-prefixed or env-suffixed)
 - [ ] IAM bindings are per SA — no project-wide secretAccessor for runtime SAs
 - [ ] CI deployer can create/update secrets; runtime SAs only accessor
-- [ ] Local `.env` files are never copied into the wrong codebase
+- [ ] Per-env `configDir` / `.env` files are never copied into the wrong deploy
+- [ ] Client `prefixes` match firebase.json `prefix` values

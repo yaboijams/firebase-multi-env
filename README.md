@@ -25,7 +25,7 @@ Public imports:
 | `firebase-multi-env/functions-v1` | callable wrapper (v1) |
 | `firebase-multi-env/functions-v2` | callable wrapper (v2) |
 | `firebase-multi-env/http` | `onRequest` / Express-style wrapper |
-| `firebase-multi-env/client` | callable + client Firestore kit |
+| `firebase-multi-env/client` | callable (+ prefix) + client Firestore kit |
 | `firebase-multi-env/eslint` | ESLint plugin (forbid bare Admin Firestore / require pinned) |
 
 ## Install
@@ -162,24 +162,41 @@ firebase target:apply hosting cert myapp-cert
 firebase target:apply hosting prod myapp
 ```
 
-Example `firebase.json`:
+Example `firebase.json` (same Functions source, unique `prefix` per env so IDs do not collide):
 
 ```json
 {
+  "functions": [
+    { "source": "functions", "codebase": "prod", "prefix": "prod", "configDir": "functions/config/prod" },
+    { "source": "functions", "codebase": "qual", "prefix": "qual", "configDir": "functions/config/qual" },
+    { "source": "functions", "codebase": "cert", "prefix": "cert", "configDir": "functions/config/cert" }
+  ],
   "firestore": [
     { "database": "(default)", "rules": "firestore.prod.rules", "indexes": "firestore.indexes.json" },
     { "database": "qual-env", "rules": "firestore.qual.rules", "indexes": "firestore.indexes.json" },
     { "database": "cert-env", "rules": "firestore.cert.rules", "indexes": "firestore.indexes.json" }
   ],
   "hosting": [
-    { "target": "qual", "public": "dist" },
-    { "target": "cert", "public": "dist" },
-    { "target": "prod", "public": "dist" }
+    {
+      "target": "qual",
+      "public": "dist",
+      "rewrites": [{ "source": "/api/**", "function": { "functionId": "qual-api", "codebase": "qual" } }]
+    },
+    {
+      "target": "cert",
+      "public": "dist",
+      "rewrites": [{ "source": "/api/**", "function": { "functionId": "cert-api", "codebase": "cert" } }]
+    },
+    {
+      "target": "prod",
+      "public": "dist",
+      "rewrites": [{ "source": "/api/**", "function": { "functionId": "prod-api", "codebase": "prod" } }]
+    }
   ]
 }
 ```
 
-Rules templates ship in `templates/` (and via `init`). Gated DBs must check `allowedEnvs`; prod should not.
+Full example: `templates/firebase.codebases.example.json` (copied under `multi-env/` by `init`). Rules templates ship in `templates/` (and via `init`). Gated DBs must check `allowedEnvs`; prod should not.
 
 ## Cloud Functions (callables)
 
@@ -256,6 +273,12 @@ const { callable, getDb } = createMultiEnvClient({
   app,
   functions: getFunctions(app),
   appEnv,
+  // Must match firebase.json functions[].prefix (CLI deploys `${prefix}-${name}`)
+  prefixes: {
+    production: 'prod',
+    qual: 'qual',
+    cert: 'cert',
+  },
   databases: {
     production: '(default)',
     qual: 'qual-env',
@@ -263,11 +286,11 @@ const { callable, getDb } = createMultiEnvClient({
   },
 });
 
-await callable('syncData')({ /* payload */ });
+await callable('syncData')({ /* payload */ }); // → qual-syncData when appEnv is "qual"
 const db = getDb();
 ```
 
-Or use `createCallable` / `createGetClientFirestore` individually.
+Or use `createCallable` / `resolveFunctionId` / `createGetClientFirestore` individually.
 
 ## Grant environment access
 
@@ -304,7 +327,7 @@ See `templates/PROVISION.md`. Scripts do not call GCP until you run them.
 - `getDbForEnv` for scripts/jobs; fail-closed `getDb` when request context is required
 - `onResolveEnv` audit hook
 - Optional HTTP ID token verification
-- Client callable + Firestore helpers
+- Client callable + Firestore helpers (`prefixes` / `resolveFunctionId` for firebase.json `prefix`)
 - Server guards (`requireAuth`, `requireOwner`, `requireClaim`)
 - Rules templates (Firestore + Storage) + `init` / `doctor --strict`
 - ESLint plugin (`no-bare-admin-firestore`, `require-pinned-runtime`)

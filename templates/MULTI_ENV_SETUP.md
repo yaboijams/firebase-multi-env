@@ -70,6 +70,19 @@ export const withAppEnv = createWithAppEnvV2(appEnvRuntime);
 
 Attach a per-env `serviceAccount` on each `onCall` / `onRequest` (see `functions.pinned.qual.example.ts`).
 
+Use **one functions source** with per-env codebases + `prefix` (see `firebase.codebases.example.json`):
+
+```json
+{
+  "functions": [
+    { "source": "functions", "codebase": "prod", "prefix": "prod", "configDir": "functions/config/prod" },
+    { "source": "functions", "codebase": "qual", "prefix": "qual", "configDir": "functions/config/qual" }
+  ]
+}
+```
+
+Export `syncData` once → deployed as `prod-syncData` / `qual-syncData`. Hosting rewrites must use the prefixed `functionId`.
+
 For raw HTTP handlers, verify ID tokens:
 
 ```ts
@@ -99,11 +112,18 @@ const { callable, getDb } = createMultiEnvClient({
   app,
   functions: getFunctions(app),
   appEnv,
+  prefixes: {
+    production: 'prod',
+    qual: 'qual',
+  },
   databases: {
     production: '(default)',
     qual: 'qual-env',
   },
 });
+
+// Calls qual-syncData when appEnv is "qual" (matches firebase.json prefix)
+await callable('syncData')({ /* payload */ });
 ```
 
 ## 5. Grant gated access

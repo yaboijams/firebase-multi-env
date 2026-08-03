@@ -30,9 +30,10 @@ export default [
 ## Must-have
 
 - [ ] **Pinned Functions** — `createEnvRuntime({ pinned: true, pinnedEnvironment: process.env.APP_ENV, ... })`
-- [ ] **One Functions deploy (codebase) per env** — see `firebase.codebases.example.json`
+- [ ] **One Functions deploy (codebase) per env** — same source + unique `prefix` per codebase (see `firebase.codebases.example.json`)
+- [ ] **Prefixed function IDs** — Hosting rewrites + client `prefixes` use `qual-api` / `prod-syncData` (Firebase joins `${prefix}-${name}`)
 - [ ] **One runtime service account per env** — generate with `npx firebase-multi-env provision` (see `PROVISION.md` / `iam-sa-per-env.md`)
-- [ ] **Hosting target per env** rewrites only to that env’s codebase
+- [ ] **Hosting target per env** rewrites only to that env’s codebase + prefixed functionId
 - [ ] **Per-env secrets** — Secret Manager + SA bindings; no shared `STRIPE_SECRET` — see `secrets-per-env.md` / `provision`
 - [ ] **Deploy isolation** — separate CI jobs / WIF identities; prod deployer cannot deploy qual — see `deploy-isolation.md`
 - [ ] **Firestore rules per database** — gated DBs check `allowedEnvs`; prod does not

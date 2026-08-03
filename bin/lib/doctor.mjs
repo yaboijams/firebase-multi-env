@@ -125,6 +125,136 @@ export function fileHasUnpinnedRuntime(text) {
 }
 
 /**
+ * Parse firebase.json functions entries (array or single object).
+ * @param {unknown} raw
+ * @returns {Array<{ codebase?: string, source?: string, prefix?: string }>}
+ */
+export function parseFunctionsConfigs(raw) {
+  if (!raw || typeof raw !== 'object') {
+    return [];
+  }
+  const functions = /** @type {{ functions?: unknown }} */ (raw).functions;
+  if (Array.isArray(functions)) {
+    return functions.filter((item) => item && typeof item === 'object');
+  }
+  if (functions && typeof functions === 'object') {
+    return [functions];
+  }
+  return [];
+}
+
+/**
+ * @param {string} targetRoot
+ * @returns {Array<{ codebase?: string, source?: string, prefix?: string }> | null}
+ */
+export function readFirebaseFunctionsConfigs(targetRoot) {
+  const firebaseJsonPath = join(targetRoot, 'firebase.json');
+  if (!existsSync(firebaseJsonPath)) {
+    return null;
+  }
+  try {
+    const raw = JSON.parse(readFileSync(firebaseJsonPath, 'utf8'));
+    return parseFunctionsConfigs(raw);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Multi-codebase deploys need unique function IDs — prefer firebase.json `prefix`.
+ * @param {string} targetRoot
+ * @param {Array<{ file: string, text: string }>} allText
+ * @param {boolean} strict
+ * @returns {Finding[]}
+ */
+export function inspectFunctionPrefixes(targetRoot, allText, strict) {
+  /** @type {Finding[]} */
+  const findings = [];
+  const configs = readFirebaseFunctionsConfigs(targetRoot);
+
+  if (!configs) {
+    const mentionsCodebases = allText.some(({ text }) =>
+      /"codebase"\s*:|"prefix"\s*:|functions:qual|functions:prod/.test(text),
+    );
+    if (mentionsCodebases) {
+      findings.push({
+        level: 'info',
+        code: 'function-prefix',
+        message:
+          'No firebase.json at scan root — ensure each Functions codebase sets a unique `prefix` (see multi-env/firebase.codebases.example.json).',
+      });
+    }
+    return findings;
+  }
+
+  if (configs.length <= 1) {
+    if (configs[0]?.prefix) {
+      findings.push({
+        level: 'ok',
+        code: 'function-prefix',
+        message: `Functions prefix "${configs[0].prefix}" configured.`,
+      });
+    }
+    return findings;
+  }
+
+  const missingPrefix = configs.filter((c) => !c.prefix || !String(c.prefix).trim());
+  const prefixes = configs.map((c) => String(c.prefix || '').trim()).filter(Boolean);
+  const uniquePrefixes = new Set(prefixes);
+  const sources = configs.map((c) => String(c.source || '').trim());
+  const uniqueSources = new Set(sources.filter(Boolean));
+  const sharedSource = uniqueSources.size > 0 && uniqueSources.size < configs.length;
+
+  if (missingPrefix.length > 0) {
+    findings.push({
+      level: strict ? 'error' : 'warn',
+      code: 'function-prefix',
+      message:
+        `${missingPrefix.length} of ${configs.length} functions codebases lack \`prefix\`. `
+        + 'Function IDs must be unique in a project — set firebase.json `prefix` per codebase '
+        + '(same source + different prefixes is the recommended layout).',
+    });
+  } else if (uniquePrefixes.size < prefixes.length) {
+    findings.push({
+      level: strict ? 'error' : 'warn',
+      code: 'function-prefix',
+      message: 'Duplicate functions `prefix` values — each codebase needs a unique prefix.',
+    });
+  } else {
+    findings.push({
+      level: 'ok',
+      code: 'function-prefix',
+      message: sharedSource
+        ? `Same-source multi-codebase with unique prefixes: ${[...uniquePrefixes].join(', ')}.`
+        : `Multiple functions codebases with unique prefixes: ${[...uniquePrefixes].join(', ')}.`,
+    });
+  }
+
+  const hasClientPrefix = allText.some(({ text }) =>
+    /\bprefixes\s*:/.test(text)
+    || /\bfunctionPrefix\s*:/.test(text)
+    || text.includes('resolveFunctionId'),
+  );
+  if (!missingPrefix.length && uniquePrefixes.size === prefixes.length && !hasClientPrefix) {
+    findings.push({
+      level: strict ? 'warn' : 'info',
+      code: 'client-function-prefix',
+      message:
+        'firebase.json uses function prefixes but no client `prefixes` / `functionPrefix` / `resolveFunctionId` found. '
+        + 'Wire createCallable / createMultiEnvClient so callables hit qual-syncData (not syncData).',
+    });
+  } else if (hasClientPrefix && !missingPrefix.length) {
+    findings.push({
+      level: 'ok',
+      code: 'client-function-prefix',
+      message: 'Client function prefix wiring detected.',
+    });
+  }
+
+  return findings;
+}
+
+/**
  * @param {object} options
  * @param {string} options.targetRoot
  * @param {boolean} [options.strict]
@@ -208,6 +338,8 @@ export function runDoctor({ targetRoot, strict = false, cwd = process.cwd() }) {
   )
     || existsSync(join(targetRoot, 'multi-env', 'storage.gated.rules.snippet'))
     || allText.some(({ text }) => /match \/b\/\{bucket\}/.test(text));
+
+  findings.push(...inspectFunctionPrefixes(targetRoot, allText, strict));
 
   // --- Baseline checks ---
 

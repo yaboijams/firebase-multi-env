@@ -27,7 +27,8 @@ Deployed Cloud Functions refuse unpinned config unless `allowUnpinnedCloudDeploy
 
 ## Pinned mode (required for production)
 
-Each environment gets its own Functions deploy (or codebase target) running as its own service account.
+Each environment gets its own Functions deploy (codebase + `prefix`) running as its own service account.
+Function IDs must be unique in the project — use firebase.json `prefix` so one source tree yields `qual-*` and `prod-*`.
 
 ```ts
 export const appEnvRuntime = createEnvRuntime({
