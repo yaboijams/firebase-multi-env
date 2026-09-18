@@ -6,6 +6,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import * as functions from 'firebase-functions';
 import {
   assertNoEmulatorEnvLeak,
+  assertEnvProjectMatch,
   normalizeEnvConfig,
   type NormalizedEnvConfig,
 } from './config.js';
@@ -248,12 +249,22 @@ export function createEnvRuntime<
       );
     }
 
+    try {
+      assertEnvProjectMatch(normalized.isolationMode, appEnv, def.projectId);
+    } catch (error) {
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+
     return {
       appEnv,
       firestoreDatabaseId: process.env.FIRESTORE_EMULATOR_HOST
         ? '(default)'
         : def.database,
       firestoreEnvTag: appEnv,
+      projectId: def.projectId,
     };
   }
 

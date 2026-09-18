@@ -11,5 +11,6 @@ export {
 } from './firestore.js';
 export {
   createMultiEnvClient,
+  assertClientProjectId,
   type CreateMultiEnvClientOptions,
 } from './createClient.js';

@@ -9,9 +9,11 @@ substitute for separate Firebase/GCP projects when blast radius must be absolute
 
 | Approach | Best for |
 |---|---|
-| Separate Firebase projects | Highest blast-radius isolation (billing, IAM admin, Auth) |
-| **Pinned + per-env SA/secrets/CI** (this package’s production path) | Shared Auth / one project, project-parity staging vs prod |
+| **`isolationMode: 'projects'`** (separate Firebase projects) | Highest blast-radius isolation (billing, IAM admin, Auth) |
+| **Pinned + per-env SA/secrets/CI** (`databases` mode) | Shared Auth / one project, project-parity staging vs prod |
 | Logical (unpinned) mode | Local/dev, emulators only |
+
+For `projects` mode, sync only skeleton shape and allowlisted users (`parity` / `sync-users`) — never live-replicate prod Auth or secret values.
 
 For production:
 

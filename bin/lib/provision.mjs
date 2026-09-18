@@ -8,6 +8,7 @@
 
 import { mkdirSync, writeFileSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
+import { loadProjectSkeleton, resolveSaId } from './skeleton.mjs';
 
 /** @typedef {{
  *   name: string,
@@ -467,7 +468,12 @@ export function parseProvisionArgs(args) {
   const secretsIdx = args.indexOf('--secrets');
   const locationIdx = args.indexOf('--location');
   const dirIdx = args.indexOf('--dir');
+  const modeIdx = args.indexOf('--mode');
+  const skeletonIdx = args.indexOf('--skeleton');
   const printOnly = args.includes('--print');
+
+  const modeRaw = modeIdx >= 0 ? args[modeIdx + 1] : 'databases';
+  const mode = modeRaw === 'projects' ? 'projects' : 'databases';
 
   const projectId =
     (projectIdx >= 0 ? args[projectIdx + 1] : null)
@@ -479,21 +485,330 @@ export function parseProvisionArgs(args) {
   const envsRaw = envsIdx >= 0 ? args[envsIdx + 1] : null;
   const secretsRaw = secretsIdx >= 0 ? args[secretsIdx + 1] : undefined;
   const location = locationIdx >= 0 ? args[locationIdx + 1] : 'us-central1';
-  const outDir = dirIdx >= 0 ? args[dirIdx + 1] : 'multi-env/provision';
+  const outDir = dirIdx >= 0
+    ? args[dirIdx + 1]
+    : mode === 'projects'
+      ? 'multi-env/provision/projects'
+      : 'multi-env/provision';
+  const skeletonPath = skeletonIdx >= 0 ? args[skeletonIdx + 1] : 'multi-env/skeleton.json';
 
   if (!envsRaw) {
     throw new Error(
-      'Missing --envs. Example:\n'
-      + '  firebase-multi-env provision --project my-app --envs production,qual',
+      mode === 'projects'
+        ? 'Missing --envs. Example:\n'
+          + '  firebase-multi-env provision --mode projects --envs production:my-app-prod,qual:my-app-qual'
+        : 'Missing --envs. Example:\n'
+          + '  firebase-multi-env provision --project my-app --envs production,qual',
     );
   }
 
   return {
+    mode,
     projectId,
     envsRaw,
     secretsRaw,
     location: location || 'us-central1',
-    outDir: outDir || 'multi-env/provision',
+    outDir: outDir || (mode === 'projects' ? 'multi-env/provision/projects' : 'multi-env/provision'),
+    skeletonPath: skeletonPath || 'multi-env/skeleton.json',
     printOnly,
   };
+}
+
+/**
+ * Parse `--envs production:my-app-prod,qual:my-app-qual` for projects mode.
+ * @param {string} raw
+ * @returns {Array<{ name: string, projectId: string, saId: string, secretSuffix: string, bucket: string, database: string }>}
+ */
+export function parseProjectEnvs(raw) {
+  if (!raw?.trim()) {
+    throw new Error(
+      'Missing --envs. Example: --envs production:my-app-prod,qual:my-app-qual',
+    );
+  }
+
+  const parts = raw.split(',').map((p) => p.trim()).filter(Boolean);
+  /** @type {Array<{ name: string, projectId: string, saId: string, secretSuffix: string, bucket: string, database: string }>} */
+  const envs = [];
+  const seenNames = new Set();
+  const seenProjects = new Set();
+
+  for (const part of parts) {
+    const colon = part.indexOf(':');
+    if (colon <= 0 || colon === part.length - 1) {
+      throw new Error(
+        `Invalid projects env entry "${part}". Use name:projectId (e.g. qual:my-app-qual).`,
+      );
+    }
+    const name = part.slice(0, colon).trim();
+    const projectId = part.slice(colon + 1).trim();
+    if (!name || !projectId) {
+      throw new Error(`Invalid projects env entry "${part}".`);
+    }
+    if (seenNames.has(name)) {
+      throw new Error(`Duplicate environment: "${name}"`);
+    }
+    if (seenProjects.has(projectId)) {
+      throw new Error(`Duplicate projectId: "${projectId}"`);
+    }
+    seenNames.add(name);
+    seenProjects.add(projectId);
+
+    envs.push({
+      name,
+      projectId,
+      saId: saIdForEnv(name),
+      secretSuffix: secretSuffixForEnv(name),
+      database: '(default)',
+      bucket: bucketForEnv(name, projectId),
+    });
+  }
+
+  return envs;
+}
+
+/**
+ * @param {object} options
+ * @param {import('./skeleton.mjs').ProjectSkeleton} options.skeleton
+ * @param {{ name: string, projectId: string, saId: string, secretSuffix: string, bucket: string, database: string }} options.env
+ * @param {string} [options.location]
+ */
+export function renderProjectEnvScript({ skeleton, env, location = 'us-central1' }) {
+  const saEmail = `${env.saId}@${env.projectId}.iam.gserviceaccount.com`;
+  const secretBases = skeleton.secrets.length > 0 ? skeleton.secrets : ['STRIPE_SECRET'];
+  const lines = [
+    '#!/usr/bin/env bash',
+    `# firebase-multi-env provision (projects) — env: ${env.name}`,
+    '# Generated from multi-env/skeleton.json. Review before running.',
+    'set -euo pipefail',
+    '',
+    `PROJECT_ID="${env.projectId}"`,
+    `ENV_NAME="${env.name}"`,
+    `SA_ID="${env.saId}"`,
+    `SA_EMAIL="${saEmail}"`,
+    `LOCATION="${location}"`,
+    `BUCKET="${env.bucket}"`,
+    '',
+    'echo "=== Provisioning ${ENV_NAME} in project ${PROJECT_ID} ==="',
+    '',
+    'echo "Ensure the Firebase/GCP project exists and billing is linked, then continue."',
+    '# firebase projects:create "${PROJECT_ID}" --display-name "${ENV_NAME}" || true',
+    '',
+  ];
+
+  if (skeleton.services.firestore) {
+    lines.push(
+      'echo "Firestore (default) — create in console or:"',
+      'echo "  firebase firestore:databases:create \'(default)\' --location=${LOCATION} --project=${PROJECT_ID}"',
+      '',
+    );
+  }
+
+  if (skeleton.services.storage) {
+    lines.push(
+      'if gcloud storage buckets describe "gs://${BUCKET}" --project="${PROJECT_ID}" >/dev/null 2>&1; then',
+      '  echo "Bucket gs://${BUCKET} already exists"',
+      'else',
+      '  gcloud storage buckets create "gs://${BUCKET}" \\',
+      '    --project="${PROJECT_ID}" \\',
+      '    --location="${LOCATION}"',
+      'fi',
+      '',
+    );
+  }
+
+  lines.push(
+    'if gcloud iam service-accounts describe "${SA_EMAIL}" --project="${PROJECT_ID}" >/dev/null 2>&1; then',
+    '  echo "SA ${SA_EMAIL} already exists"',
+    'else',
+    '  gcloud iam service-accounts create "${SA_ID}" \\',
+    '    --project="${PROJECT_ID}" \\',
+    `    --display-name="Functions runtime (${env.name})"`,
+    'fi',
+    '',
+  );
+
+  for (const role of skeleton.runtimeSa.roles) {
+    lines.push(
+      `gcloud projects add-iam-policy-binding "\${PROJECT_ID}" \\`,
+      `  --member="serviceAccount:\${SA_EMAIL}" \\`,
+      `  --role="${role}" \\`,
+      '  --condition=None >/dev/null',
+      '',
+    );
+  }
+
+  for (const base of secretBases) {
+    const secretId = `${base}_${env.secretSuffix}`;
+    lines.push(
+      `SECRET_ID="${secretId}"`,
+      'if gcloud secrets describe "${SECRET_ID}" --project="${PROJECT_ID}" >/dev/null 2>&1; then',
+      '  echo "Secret ${SECRET_ID} already exists"',
+      'else',
+      '  printf \'%s\' "REPLACE_ME_${SECRET_ID}" | gcloud secrets create "${SECRET_ID}" \\',
+      '    --project="${PROJECT_ID}" \\',
+      '    --data-file=-',
+      'fi',
+      'gcloud secrets add-iam-policy-binding "${SECRET_ID}" \\',
+      '  --project="${PROJECT_ID}" \\',
+      '  --member="serviceAccount:${SA_EMAIL}" \\',
+      '  --role="roles/secretmanager.secretAccessor" >/dev/null',
+      '',
+    );
+  }
+
+  lines.push(
+    'echo ""',
+    'echo "Auth providers (enable in console or Identity Toolkit API):"',
+    ...skeleton.auth.providers.map((p) => `echo "  - ${p}"`),
+    'echo "Authorized domains (patterns from skeleton):"',
+    ...skeleton.auth.authorizedDomainPatterns.map(
+      (p) => `echo "  - ${p.replace(/\{projectId\}/g, env.projectId)}"`,
+    ),
+    '',
+    'echo "Done ${ENV_NAME}. Set APP_ENV=${ENV_NAME} and serviceAccount=${SA_EMAIL} on deploy."',
+    '',
+  );
+
+  return lines.join('\n');
+}
+
+/**
+ * @param {object} options
+ */
+export function renderProjectAllScript({ envs }) {
+  const lines = [
+    '#!/usr/bin/env bash',
+    '# firebase-multi-env provision — all projects',
+    'set -euo pipefail',
+    'SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
+    '',
+    `echo "Provisioning ${envs.length} separate Firebase projects"`,
+    '',
+  ];
+  for (const env of envs) {
+    lines.push(`bash "\${SCRIPT_DIR}/provision.${env.name}.sh"`);
+  }
+  lines.push(
+    '',
+    'echo ""',
+    'echo "All project scripts finished."',
+    'echo "Next:"',
+    'echo "  1. Replace REPLACE_ME_* secret values in each project"',
+    'echo "  2. Deploy each env to its projectId with APP_ENV set"',
+    'echo "  3. Bootstrap testers: npx firebase-multi-env sync-users --emails you@email.com --envs qual"',
+    'echo "  4. npx firebase-multi-env doctor --strict"',
+    '',
+  );
+  return lines.join('\n');
+}
+
+/**
+ * @param {object} options
+ */
+export function renderProjectReadme({ envs, skeleton }) {
+  const rows = envs
+    .map(
+      (e) =>
+        `| \`${e.name}\` | \`${e.projectId}\` | \`${e.saId}@${e.projectId}.iam.gserviceaccount.com\` | \`gs://${e.bucket}\` |`,
+    )
+    .join('\n');
+
+  return `# Multi-project provision scripts (generated)
+
+Generated by \`firebase-multi-env provision --mode projects\` from **multi-env/skeleton.json**.
+
+Each environment is a **separate Firebase/GCP project** (separate Auth, billing, IAM).
+
+## Environments
+
+| Env | Project | Runtime SA | Storage bucket |
+|---|---|---|---|
+${rows}
+
+## Skeleton (editable)
+
+Edit \`multi-env/skeleton.json\` then re-run provision or \`parity\` to refresh scripts.
+
+- Runtime roles: ${skeleton.runtimeSa.roles.map((r) => `\`${r}\``).join(', ')}
+- Secrets (names only): ${skeleton.secrets.map((s) => `\`${s}\``).join(', ') || '(none)'}
+- Auth providers: ${skeleton.auth.providers.join(', ')}
+
+## Run
+
+\`\`\`bash
+bash provision.all.sh
+\`\`\`
+
+## Users
+
+Do **not** use \`grant-env\` (shared-Auth claims). Bootstrap selected emails:
+
+\`\`\`bash
+npx firebase-multi-env sync-users --emails you@email.com --envs qual,cert
+\`\`\`
+
+Same email ⇒ different UIDs per project.
+`;
+}
+
+/**
+ * @param {object} options
+ * @param {string} options.envsRaw
+ * @param {string} [options.location]
+ * @param {string} [options.outDir]
+ * @param {boolean} [options.printOnly]
+ * @param {string} [options.targetRoot]
+ * @param {string} [options.skeletonPath]
+ * @param {import('./skeleton.mjs').ProjectSkeleton} [options.skeleton]
+ */
+export function buildProjectProvisionFiles({
+  envsRaw,
+  location = 'us-central1',
+  outDir = 'multi-env/provision/projects',
+  printOnly = false,
+  targetRoot = process.cwd(),
+  skeletonPath = 'multi-env/skeleton.json',
+  skeleton: skeletonOverride,
+}) {
+  const skeleton = skeletonOverride
+    ?? loadProjectSkeleton(targetRoot, skeletonPath);
+
+  const envs = parseProjectEnvs(envsRaw);
+  for (const env of envs) {
+    env.saId = resolveSaId(skeleton.runtimeSa.idPattern, env.name);
+  }
+
+  /** @type {Array<{ path: string, content: string }>} */
+  const files = [];
+
+  for (const env of envs) {
+    files.push({
+      path: join(outDir, `provision.${env.name}.sh`),
+      content: renderProjectEnvScript({ skeleton, env, location }),
+    });
+  }
+
+  files.push({
+    path: join(outDir, 'provision.all.sh'),
+    content: renderProjectAllScript({ envs }),
+  });
+
+  files.push({
+    path: join(outDir, 'README.md'),
+    content: renderProjectReadme({ envs, skeleton }),
+  });
+
+  if (!printOnly) {
+    mkdirSync(outDir, { recursive: true });
+    for (const file of files) {
+      writeFileSync(file.path, file.content, { mode: 0o755 });
+      try {
+        chmodSync(file.path, 0o755);
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  return { files, envs, skeleton, outDir, mode: 'projects' };
 }

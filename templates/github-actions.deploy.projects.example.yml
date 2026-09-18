@@ -1,0 +1,43 @@
+# Multi-project deploy matrix (example)
+
+Deploy each environment to its own Firebase project. Replace project IDs and WIF provider values.
+
+```yaml
+name: Deploy (multi-project)
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    strategy:
+      matrix:
+        include:
+          - env: production
+            project_id: my-app-prod
+            workload_identity_provider: projects/123/locations/global/workloadIdentityPools/github/providers/github
+            service_account: deploy-prod@my-app-prod.iam.gserviceaccount.com
+          - env: qual
+            project_id: my-app-qual
+            workload_identity_provider: projects/456/locations/global/workloadIdentityPools/github/providers/github
+            service_account: deploy-qual@my-app-qual.iam.gserviceaccount.com
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ matrix.workload_identity_provider }}
+          service_account: ${{ matrix.service_account }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - run: npm ci
+      - run: npm run build
+      - run: npx firebase deploy --project ${{ matrix.project_id }} --only functions,hosting
+        env:
+          APP_ENV: ${{ matrix.env }}
+```
+
+Each job must only have deploy rights to **its** project. Do not share a prod deployer SA with qual.

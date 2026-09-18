@@ -4,6 +4,7 @@ export type {
   EnvRuntimeConfig,
   EnvResolveEvent,
   EnvResolveSource,
+  IsolationMode,
   RuntimeEnv,
   EnvRequestContext,
   AuthLike,
