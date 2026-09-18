@@ -30,6 +30,7 @@ describe('pinned isolation mode', () => {
       appEnv: 'qual',
       firestoreDatabaseId: 'qual-env',
       firestoreEnvTag: 'qual',
+      projectId: null,
     });
   });
 
@@ -146,6 +147,7 @@ describe('pinned isolation mode', () => {
       appEnv: 'cert',
       firestoreDatabaseId: 'cert-env',
       firestoreEnvTag: 'cert',
+      projectId: null,
     });
 
     try {

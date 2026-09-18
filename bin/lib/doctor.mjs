@@ -5,6 +5,7 @@
 
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { validateProjectSkeleton } from './skeleton.mjs';
 
 const SKIP_DIRS = new Set([
   'node_modules',
@@ -340,6 +341,70 @@ export function runDoctor({ targetRoot, strict = false, cwd = process.cwd() }) {
     || allText.some(({ text }) => /match \/b\/\{bucket\}/.test(text));
 
   findings.push(...inspectFunctionPrefixes(targetRoot, allText, strict));
+
+  const hasProjectsMode = contents.some(({ text }) =>
+    /isolationMode\s*:\s*['"]projects['"]/.test(text),
+  );
+  const skeletonPath = join(targetRoot, 'multi-env', 'skeleton.json');
+  const hasSkeleton = existsSync(skeletonPath);
+  const hasProjectsDoc = existsSync(join(targetRoot, 'multi-env', 'PROJECTS_ISOLATION.md'));
+
+  if (hasProjectsMode || hasSkeleton) {
+    if (hasSkeleton) {
+      try {
+        const skeleton = validateProjectSkeleton(
+          JSON.parse(readFileSync(skeletonPath, 'utf8')),
+        );
+        findings.push({
+          level: 'ok',
+          code: 'skeleton',
+          message: `Found editable skeleton (roles: ${skeleton.runtimeSa.roles.length}, secrets: ${skeleton.secrets.length}).`,
+        });
+      } catch (error) {
+        findings.push({
+          level: strict ? 'error' : 'warn',
+          code: 'skeleton-invalid',
+          message: `multi-env/skeleton.json invalid: ${error instanceof Error ? error.message : error}`,
+        });
+      }
+    } else if (hasProjectsMode) {
+      findings.push({
+        level: strict ? 'error' : 'warn',
+        code: 'skeleton-missing',
+        message:
+          'isolationMode: "projects" found but multi-env/skeleton.json is missing. Run: npx firebase-multi-env init --mode projects',
+      });
+    }
+
+    if (hasProjectsMode) {
+      findings.push({
+        level: 'ok',
+        code: 'isolation-projects',
+        message: 'isolationMode: "projects" detected (separate Auth / billing per env).',
+      });
+      const hasProjectId = contents.some(({ text }) => /projectId\s*:/.test(text));
+      if (!hasProjectId) {
+        findings.push({
+          level: strict ? 'error' : 'warn',
+          code: 'project-id',
+          message: 'projects mode should set projectId on each environment definition.',
+        });
+      } else {
+        findings.push({
+          level: 'ok',
+          code: 'project-id',
+          message: 'projectId referenced in environment config.',
+        });
+      }
+      if (!hasProjectsDoc) {
+        findings.push({
+          level: 'info',
+          code: 'projects-docs',
+          message: 'See multi-env/PROJECTS_ISOLATION.md (init --mode projects).',
+        });
+      }
+    }
+  }
 
   // --- Baseline checks ---
 

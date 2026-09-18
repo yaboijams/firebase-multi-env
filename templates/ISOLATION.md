@@ -1,10 +1,21 @@
-# Isolation model (one Firebase project)
+# Isolation model
+
+This package supports two isolation modes:
+
+| Mode | Boundary | Auth |
+|---|---|---|
+| **`databases` (default)** | One project; Origin → Firestore DB + claims | Shared + `allowedEnvs` |
+| **`projects`** | One Firebase/GCP project per env | Separate pools; use `sync-users` |
+
+See `PROJECTS_ISOLATION.md` for the multi-project path (editable skeleton, `parity`, separate billing).
+
+## databases mode (one Firebase project)
 
 This package provides **request-local environment routing** (Origin + claims) and a
 **pinned production path** aimed at project-parity isolation (shared Auth, separate
 data plane per env).
 
-## Two layers
+## Layers
 
 | Layer | What it answers | Who owns it |
 |---|---|---|
@@ -12,15 +23,15 @@ data plane per env).
 | **Pinned deploy** (`pinned: true`) | Can *this process* only serve one env? | This package + your deploy |
 | **IAM / service accounts** | Can compromised code open another DB? | Your GCP project |
 | **Secrets / Storage / CI** | Can one env read another’s keys or ship to prod? | Your GCP + CI |
-| **Separate projects** | Strongest blast-radius boundary | Optional upgrade |
+| **Separate projects** (`isolationMode: 'projects'`) | Strongest blast-radius boundary | This package (setup) + your GCP |
 
-## Recommended ladder (one project)
+## Recommended ladder (databases mode)
 
 1. **Pinned deploys + per-env service accounts** — production default (see `PROJECT_PARITY.md`)
 2. **Per-env secrets + Storage buckets** — close shared-credential gaps
 3. **Deploy isolation (WIF / CI)** — stop humans and bots from cross-wiring envs
 4. **Org policy + deny policies** — stop re-attaching broad roles
-5. **Separate Firebase/GCP projects** — when blast radius must be small
+5. **`isolationMode: 'projects'`** — when billing/Auth blast radius must be hard
 
 Logical (unpinned) Origin→DB selection is for **emulators and local multi-env convenience**.
 Deployed Cloud Functions refuse unpinned config unless `allowUnpinnedCloudDeploy: true`.

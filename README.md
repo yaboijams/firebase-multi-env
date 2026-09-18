@@ -2,19 +2,20 @@
 
 [![npm](https://img.shields.io/npm/v/firebase-multi-env.svg)](https://www.npmjs.com/package/firebase-multi-env)
 
-**Hardened single-project environment isolation** for Firebase: Origin → environment → Firestore database, with claim-based authorization for gated environments and **pinned** per-env deploys as the production path.
+**Hardened multi-environment Firebase isolation** with two modes:
 
-One Firebase project, multiple Firestore databases, multiple Hosting sites. Production users do not need special rights; gated envs (qual/cert/…) require an `allowedEnvs` claim.
+- **`databases` (default):** one project — Origin → env → Firestore DB, shared Auth + `allowedEnvs`, pinned per-env deploys
+- **`projects`:** one Firebase/GCP project per env — separate Auth, billing, and IAM; editable `multi-env/skeleton.json` + `provision` / `parity` / `sync-users`
 
-> **Production path:** pinned mode + per-env service accounts + secrets + deploy isolation (project-parity). Separate Firebase projects remain the strongest blast-radius boundary for billing/Auth/admin — see [Security model](#security-model) and `templates/PROJECT_PARITY.md`.
+> **Default production path:** pinned + per-env service accounts + secrets (`databases`). For full blast-radius isolation use `isolationMode: 'projects'` — see `templates/PROJECTS_ISOLATION.md`.
 
 ## Package layout
 
 ```text
 src/           # runtime, server, functions, client
 eslint/        # no-bare-admin-firestore, require-pinned-runtime
-templates/     # rules, IAM, secrets, deploy isolation, project parity
-bin/           # grant-env, init, doctor [--strict], provision
+templates/     # rules, IAM, secrets, deploy isolation, project parity / projects
+bin/           # grant-env, init, doctor, provision, parity, sync-users
 ```
 
 Public imports:
@@ -294,17 +295,24 @@ Or use `createCallable` / `resolveFunctionId` / `createGetClientFirestore` indiv
 
 ## Grant environment access
 
+### databases mode (shared Auth)
+
 Auth is **shared** in one Firebase project. Non-prod access uses `allowedEnvs` claims:
 
 ```bash
 gcloud auth application-default login
 npx firebase-multi-env grant-env qual --project my-project you@email.com
-npx firebase-multi-env grant-env cert --project my-project you@email.com
-# → { allowedEnvs: ['qual', 'cert'] }
-# sign out / sign in
-
-npx firebase-multi-env grant-env qual --revoke --project my-project you@email.com
 ```
+
+### projects mode (separate Auth)
+
+```bash
+npx firebase-multi-env init --mode projects
+npx firebase-multi-env provision --mode projects --envs production:my-app-prod,qual:my-app-qual
+npx firebase-multi-env sync-users --emails you@email.com --envs qual:my-app-qual
+```
+
+Edit `multi-env/skeleton.json` then re-run `parity` when the shared shape changes. See `templates/PROJECTS_ISOLATION.md`.
 
 ## Provision per-env IAM (scripts only)
 

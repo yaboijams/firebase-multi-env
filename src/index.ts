@@ -4,6 +4,7 @@ export type {
   EnvRuntimeConfig,
   EnvResolveEvent,
   EnvResolveSource,
+  IsolationMode,
   RuntimeEnv,
   EnvRequestContext,
   AuthLike,
@@ -23,6 +24,7 @@ export {
   createMultiEnvClient,
   resolveFunctionId,
   isValidFunctionPrefix,
+  assertClientProjectId,
 } from './client/index.js';
 export type {
   CreateCallableOptions,

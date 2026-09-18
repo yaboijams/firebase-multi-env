@@ -1,8 +1,11 @@
 # Project parity checklist
 
-Goal: **AWS-style env roles inside one Firebase/GCP project** — shared Auth, hard-enough isolation for QA/staging vs production without separate Firebase projects.
+Goal: choose your isolation ladder:
 
-This is the production path for `firebase-multi-env`. Logical (unpinned) mode remains for local/dev only.
+- **`databases` (default):** AWS-style env roles inside **one** Firebase/GCP project — shared Auth, hard-enough isolation for QA/staging vs production
+- **`projects`:** one Firebase project per env — see `PROJECTS_ISOLATION.md` (separate Auth / billing; editable skeleton + `parity` / `sync-users`)
+
+This checklist is the production path for **`databases`** mode. Logical (unpinned) mode remains for local/dev only.
 
 ## Gate in CI
 

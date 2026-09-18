@@ -1,21 +1,39 @@
 export type AppEnvironment = string;
 
+/**
+ * Isolation strategy for multi-environment setups.
+ * - `databases` (default): one Firebase project, multiple Firestore DBs + shared Auth
+ * - `projects`: one Firebase/GCP project per env (separate Auth, billing, IAM)
+ */
+export type IsolationMode = 'databases' | 'projects';
+
 export type EnvironmentDefinition = {
-  /** Firestore database ID for this environment */
-  database: string;
+  /**
+   * Firestore database ID for this environment.
+   * Defaults to `(default)` when `isolationMode` is `projects`.
+   */
+  database?: string;
   /** Hosting origins that map to this environment (normalized, no trailing slash) */
   origins: string[];
   /**
    * When true, Auth custom claim allowlist must include this env name.
    * Omit or false for public environments (typically production).
+   * In `projects` mode defaults to false (Auth pool itself is the gate).
    */
   requireClaim?: boolean;
+  /**
+   * Firebase / GCP project id for this environment.
+   * Required when `isolationMode` is `projects`.
+   */
+  projectId?: string;
 };
 
 export type RuntimeEnv = {
   appEnv: AppEnvironment;
   firestoreDatabaseId: string;
   firestoreEnvTag: AppEnvironment;
+  /** Set when isolationMode is `projects`; otherwise null. */
+  projectId: string | null;
 };
 
 /** How the runtime selected (or tried to select) an environment. */
@@ -48,6 +66,12 @@ export type EnvRuntimeConfig<
 > = {
   /** Named environments (keys are env names used in claims and client hints) */
   environments: TEnvs;
+  /**
+   * `databases` = single project + multi-DB (default).
+   * `projects` = one Firebase project per env (separate Auth / billing).
+   * @default 'databases'
+   */
+  isolationMode?: IsolationMode;
   /**
    * Auth custom claim key holding an array of allowed env names.
    * @default 'allowedEnvs'

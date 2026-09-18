@@ -20,6 +20,7 @@ describe('createEnvRuntime', () => {
       appEnv: 'production',
       firestoreDatabaseId: '(default)',
       firestoreEnvTag: 'production',
+      projectId: null,
     });
   });
 

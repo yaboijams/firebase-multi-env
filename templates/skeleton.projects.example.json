@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "isolationMode": "projects",
+  "services": {
+    "firestore": true,
+    "hosting": true,
+    "functions": true,
+    "storage": true
+  },
+  "runtimeSa": {
+    "idPattern": "fn-{env}",
+    "roles": [
+      "roles/datastore.user",
+      "roles/secretmanager.secretAccessor",
+      "roles/storage.objectAdmin"
+    ]
+  },
+  "deploy": {
+    "roles": [
+      "roles/firebase.admin",
+      "roles/iam.serviceAccountUser"
+    ]
+  },
+  "secrets": ["STRIPE_SECRET"],
+  "auth": {
+    "providers": ["password", "google.com"],
+    "authorizedDomainPatterns": [
+      "{projectId}.web.app",
+      "{projectId}.firebaseapp.com"
+    ]
+  },
+  "syncUsers": {
+    "claimKeys": []
+  }
+}

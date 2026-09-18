@@ -228,4 +228,88 @@ describe('normalizeEnvConfig', () => {
       delete process.env.K_SERVICE;
     }
   });
+
+  it('defaults isolationMode to databases', () => {
+    const normalized = normalizeEnvConfig(multiEnvConfig);
+    expect(normalized.isolationMode).toBe('databases');
+    expect(normalized.environments.qual?.projectId).toBeNull();
+  });
+
+  it('requires projectId and unique projects in projects mode', () => {
+    expect(() =>
+      normalizeEnvConfig({
+        isolationMode: 'projects',
+        environments: {
+          production: {
+            origins: ['https://prod.web.app'],
+          },
+        },
+      }),
+    ).toThrow(/requires projectId/);
+
+    expect(() =>
+      normalizeEnvConfig({
+        isolationMode: 'projects',
+        environments: {
+          production: {
+            projectId: 'same-proj',
+            origins: ['https://prod.web.app'],
+          },
+          qual: {
+            projectId: 'same-proj',
+            origins: ['https://qual.web.app'],
+          },
+        },
+      }),
+    ).toThrow(/mapped to both/);
+  });
+
+  it('defaults database and requireClaim in projects mode', () => {
+    const normalized = normalizeEnvConfig({
+      isolationMode: 'projects',
+      environments: {
+        production: {
+          projectId: 'app-prod',
+          origins: ['https://prod.web.app'],
+        },
+        qual: {
+          projectId: 'app-qual',
+          origins: ['https://qual.web.app'],
+        },
+      },
+    });
+
+    expect(normalized.isolationMode).toBe('projects');
+    expect(normalized.environments.production?.database).toBe('(default)');
+    expect(normalized.environments.production?.requireClaim).toBe(false);
+    expect(normalized.environments.qual?.requireClaim).toBe(false);
+    expect(normalized.environments.qual?.projectId).toBe('app-qual');
+  });
+
+  it('refuses pinned projects mode when GCLOUD_PROJECT mismatches on cloud', () => {
+    process.env.K_SERVICE = 'apiQual';
+    process.env.GCLOUD_PROJECT = 'wrong-project';
+    try {
+      expect(() =>
+        normalizeEnvConfig({
+          isolationMode: 'projects',
+          pinned: true,
+          pinnedEnvironment: 'qual',
+          environments: {
+            production: {
+              projectId: 'app-prod',
+              origins: ['https://prod.web.app'],
+            },
+            qual: {
+              projectId: 'app-qual',
+              origins: ['https://qual.web.app'],
+            },
+          },
+        }),
+      ).toThrow(/expects project "app-qual"/);
+    } finally {
+      delete process.env.K_SERVICE;
+      delete process.env.GCLOUD_PROJECT;
+    }
+  });
 });

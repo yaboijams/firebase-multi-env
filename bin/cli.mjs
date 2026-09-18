@@ -3,22 +3,31 @@
  * firebase-multi-env CLI
  *
  *   npx firebase-multi-env grant-env qual you@example.com
- *   npx firebase-multi-env grant-env qual --revoke you@example.com
- *   npx firebase-multi-env init
- *   npx firebase-multi-env doctor
- *   npx firebase-multi-env doctor --strict
+ *   npx firebase-multi-env init [--mode databases|projects]
+ *   npx firebase-multi-env doctor [--strict]
  *   npx firebase-multi-env provision --project my-app --envs production,qual
- *
- * grant-env requires Application Default Credentials:
- *   gcloud auth application-default login
+ *   npx firebase-multi-env provision --mode projects --envs production:proj-p,qual:proj-q
+ *   npx firebase-multi-env parity iam --envs production:proj-p,qual:proj-q
+ *   npx firebase-multi-env sync-users --emails you@email.com --envs qual:proj-q
  */
 
 import { createRequire } from 'node:module';
-import { copyFileSync, mkdirSync, existsSync } from 'node:fs';
+import { copyFileSync, mkdirSync, existsSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { printDoctorResult, runDoctor } from './lib/doctor.mjs';
-import { buildProvisionFiles, parseProvisionArgs } from './lib/provision.mjs';
+import {
+  buildProvisionFiles,
+  buildProjectProvisionFiles,
+  parseProvisionArgs,
+} from './lib/provision.mjs';
+import {
+  buildParityFiles,
+  parseParityArgs,
+  parseSyncUsersArgs,
+  syncUsersAcrossProjects,
+} from './lib/parity.mjs';
+import { defaultProjectSkeleton } from './lib/skeleton.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const packageRoot = join(__dirname, '..');
@@ -27,26 +36,32 @@ const templatesDir = join(packageRoot, 'templates');
 function printHelp() {
   console.log(`Usage:
   firebase-multi-env grant-env <env> [--revoke] [--claim allowedEnvs] [--project <id>] <email>
-  firebase-multi-env init [--dir <path>]
+  firebase-multi-env init [--dir <path>] [--mode databases|projects] [--force]
   firebase-multi-env doctor [--dir <path>] [--strict]
   firebase-multi-env provision --project <id> --envs <list> [options]
+  firebase-multi-env provision --mode projects --envs name:projectId,... [options]
+  firebase-multi-env parity [iam|auth-config|all] --envs name:projectId,... [options]
+  firebase-multi-env sync-users --emails a@x,b@y --envs name:projectId,... [--no-create]
 
 Examples:
   firebase-multi-env grant-env qual you@example.com
-  firebase-multi-env grant-env cert --revoke you@example.com
   firebase-multi-env init
-  firebase-multi-env doctor
+  firebase-multi-env init --mode projects
   firebase-multi-env doctor --strict
   firebase-multi-env provision --project my-app --envs production,qual
-  firebase-multi-env provision --project my-app --envs production:(default),qual:qual-env --secrets STRIPE_SECRET,SENDGRID --print
+  firebase-multi-env provision --mode projects --envs production:my-app-prod,qual:my-app-qual
+  firebase-multi-env parity all --envs production:my-app-prod,qual:my-app-qual
+  firebase-multi-env sync-users --emails you@email.com --envs qual:my-app-qual
 
 Provision options:
-  --project <id>       GCP / Firebase project (or GCLOUD_PROJECT)
-  --envs <list>        Comma-separated envs; optional db id via name:db-id
-  --secrets <list>     Secret base names (default: STRIPE_SECRET) → BASE_<ENV>
-  --location <region>  Default us-central1 (buckets / Firestore create hints)
-  --dir <path>         Output directory (default: multi-env/provision)
-  --print              Print scripts to stdout; do not write files
+  --mode databases|projects   Default databases (single project)
+  --project <id>              Required for databases mode
+  --envs <list>               databases: name or name:db-id; projects: name:projectId
+  --secrets <list>            databases mode secret bases (projects: from skeleton)
+  --skeleton <path>           projects mode skeleton (default multi-env/skeleton.json)
+  --location <region>         Default us-central1
+  --dir <path>                Output directory
+  --print                     Print scripts to stdout; do not write files
 `);
 }
 
@@ -141,9 +156,27 @@ async function grantEnv(args) {
   }
 }
 
+function copyTemplate(file, to, { force = false } = {}) {
+  const from = join(templatesDir, file);
+  if (!existsSync(from)) {
+    throw new Error(`Missing template: ${from}`);
+  }
+  if (existsSync(to) && !force) {
+    console.log(`Skip existing ${to} (use --force to overwrite)`);
+    return false;
+  }
+  mkdirSync(dirname(to), { recursive: true });
+  copyFileSync(from, to);
+  console.log(`Wrote ${to}`);
+  return true;
+}
+
 function initProject(args) {
   const dirIdx = args.indexOf('--dir');
+  const modeIdx = args.indexOf('--mode');
+  const force = args.includes('--force');
   const targetRoot = dirIdx >= 0 ? args[dirIdx + 1] : process.cwd();
+  const mode = modeIdx >= 0 && args[modeIdx + 1] === 'projects' ? 'projects' : 'databases';
   if (!targetRoot) {
     console.error('Missing path after --dir');
     process.exit(1);
@@ -174,23 +207,71 @@ function initProject(args) {
     { file: 'storage.public.rules.snippet', to: join(isolationDir, 'storage.public.rules.snippet') },
   ];
 
-  for (const { file, to } of files) {
-    const from = join(templatesDir, file);
-    if (!existsSync(from)) {
-      throw new Error(`Missing template: ${from}`);
-    }
-    copyFileSync(from, to);
-    console.log(`Wrote ${to}`);
+  if (mode === 'projects') {
+    files.push(
+      { file: 'PROJECTS_ISOLATION.md', to: join(isolationDir, 'PROJECTS_ISOLATION.md') },
+      { file: 'github-actions.deploy.projects.example.yml', to: join(isolationDir, 'github-actions.deploy.projects.example.yml') },
+      { file: 'skeleton.projects.example.json', to: join(isolationDir, 'skeleton.projects.example.json') },
+    );
   }
 
-  console.log('\nDone. Production path is pinned + per-env SA + secrets.');
-  console.log('See MULTI_ENV_SETUP.md and multi-env/PROJECT_PARITY.md.');
-  console.log('Generate IAM scripts: npx firebase-multi-env provision --project <id> --envs production,qual');
+  for (const { file, to } of files) {
+    copyTemplate(file, to, { force });
+  }
+
+  if (mode === 'projects') {
+    const skeletonTo = join(isolationDir, 'skeleton.json');
+    if (existsSync(skeletonTo) && !force) {
+      console.log(`Skip existing ${skeletonTo} (use --force to overwrite)`);
+    } else {
+      writeFileSync(skeletonTo, `${JSON.stringify(defaultProjectSkeleton(), null, 2)}\n`);
+      console.log(`Wrote ${skeletonTo}`);
+    }
+  }
+
+  console.log(`\nDone (mode: ${mode}).`);
+  if (mode === 'projects') {
+    console.log('Edit multi-env/skeleton.json, then:');
+    console.log('  npx firebase-multi-env provision --mode projects --envs production:PROJ_PROD,qual:PROJ_QUAL');
+    console.log('Bootstrap users: npx firebase-multi-env sync-users --emails you@email.com --envs qual:PROJ_QUAL');
+    console.log('See multi-env/PROJECTS_ISOLATION.md');
+  } else {
+    console.log('See MULTI_ENV_SETUP.md and multi-env/PROJECT_PARITY.md.');
+    console.log('Generate IAM scripts: npx firebase-multi-env provision --project <id> --envs production,qual');
+  }
   console.log('Run: npx firebase-multi-env doctor --strict');
 }
 
 function provision(args) {
   const opts = parseProvisionArgs(args);
+
+  if (opts.mode === 'projects') {
+    const result = buildProjectProvisionFiles({
+      envsRaw: opts.envsRaw,
+      location: opts.location,
+      outDir: opts.outDir,
+      printOnly: opts.printOnly,
+      targetRoot: process.cwd(),
+      skeletonPath: opts.skeletonPath,
+    });
+
+    if (opts.printOnly) {
+      for (const file of result.files) {
+        console.log(`\n===== ${file.path} =====\n`);
+        console.log(file.content);
+      }
+      return;
+    }
+
+    for (const file of result.files) {
+      console.log(`Wrote ${file.path}`);
+    }
+    console.log(`\nGenerated multi-project scripts for ${result.envs.map((e) => e.name).join(', ')}.`);
+    console.log(`  bash ${join(result.outDir, 'provision.all.sh')}`);
+    console.log('Auth is per-project — use sync-users, not grant-env.');
+    return;
+  }
+
   const result = buildProvisionFiles(opts);
 
   if (opts.printOnly) {
@@ -210,6 +291,42 @@ function provision(args) {
   console.log(`  bash ${join(result.outDir, 'provision.all.sh')}`);
   console.log('Auth stays shared — gate with: npx firebase-multi-env grant-env <env> --project ... you@email.com');
   console.log('See multi-env/PROVISION.md');
+}
+
+function parity(args) {
+  const opts = parseParityArgs(args);
+  const result = buildParityFiles(opts);
+
+  if (opts.printOnly) {
+    for (const file of result.files) {
+      console.log(`\n===== ${file.path} =====\n`);
+      console.log(file.content);
+    }
+    return;
+  }
+
+  for (const file of result.files) {
+    console.log(`Wrote ${file.path}`);
+  }
+  console.log(`\nParity (${result.target}) refreshed from skeleton for ${result.envs.map((e) => e.name).join(', ')}.`);
+}
+
+async function syncUsers(args) {
+  const opts = parseSyncUsersArgs(args);
+  const admin = loadFirebaseAdmin();
+  const results = await syncUsersAcrossProjects({
+    admin,
+    emails: opts.emails,
+    targets: opts.targets,
+    create: opts.create,
+  });
+
+  for (const row of results) {
+    console.log(
+      `${row.created ? 'Created' : 'Found'} ${row.email} in ${row.env} (${row.projectId}) uid=${row.uid}`,
+    );
+  }
+  console.log('\nNote: same email ⇒ different UIDs per project. Sign in separately per env Hosting site.');
 }
 
 function doctor(args) {
@@ -260,6 +377,21 @@ if (command === 'grant-env') {
     provision(rest);
   } catch (error) {
     console.error('Provision failed.', error instanceof Error ? error.message : error);
+    process.exit(1);
+  }
+} else if (command === 'parity') {
+  try {
+    parity(rest);
+  } catch (error) {
+    console.error('Parity failed.', error instanceof Error ? error.message : error);
+    process.exit(1);
+  }
+} else if (command === 'sync-users') {
+  try {
+    await syncUsers(rest);
+  } catch (error) {
+    console.error('sync-users failed.', error);
+    console.error('Tip: gcloud auth application-default login');
     process.exit(1);
   }
 } else {
