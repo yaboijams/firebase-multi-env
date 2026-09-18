@@ -68,6 +68,30 @@ describe('projects provision', () => {
     expect(result.files.some((f) => f.path.includes('provision.qual.sh'))).toBe(true);
     expect(result.files.some((f) => f.content.includes('app-qual'))).toBe(true);
     expect(result.envs[1]?.saId).toBe('fn-qual');
+    const qualScript = result.files.find((f) => f.path.includes('provision.qual.sh'))?.content ?? '';
+    expect(qualScript).toContain('firebase projects:create');
+    expect(qualScript).toContain('Creating Firebase/GCP project');
+  });
+
+  it('includes billing link and can skip project create', () => {
+    const skeleton = defaultProjectSkeleton();
+    const withBilling = buildProjectProvisionFiles({
+      envsRaw: 'qual:app-qual',
+      printOnly: true,
+      skeleton,
+      billingAccount: '01ABCD-EFGH12-IJKL34',
+    });
+    expect(withBilling.files[0]?.content).toContain('gcloud billing projects link');
+    expect(withBilling.files[0]?.content).toContain('01ABCD-EFGH12-IJKL34');
+
+    const skipped = buildProjectProvisionFiles({
+      envsRaw: 'qual:app-qual',
+      printOnly: true,
+      skeleton,
+      createProject: false,
+    });
+    expect(skipped.files[0]?.content).toContain('createProject=false');
+    expect(skipped.files[0]?.content).not.toContain('firebase projects:create');
   });
 });
 
