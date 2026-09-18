@@ -39,7 +39,7 @@ function printHelp() {
   firebase-multi-env init [--dir <path>] [--mode databases|projects] [--force]
   firebase-multi-env doctor [--dir <path>] [--strict]
   firebase-multi-env provision --project <id> --envs <list> [options]
-  firebase-multi-env provision --mode projects --envs name:projectId,... [options]
+  firebase-multi-env provision --mode projects --envs name:projectId,... [--billing-account <id>]
   firebase-multi-env parity [iam|auth-config|all] --envs name:projectId,... [options]
   firebase-multi-env sync-users --emails a@x,b@y --envs name:projectId,... [--no-create]
 
@@ -49,7 +49,8 @@ Examples:
   firebase-multi-env init --mode projects
   firebase-multi-env doctor --strict
   firebase-multi-env provision --project my-app --envs production,qual
-  firebase-multi-env provision --mode projects --envs production:my-app-prod,qual:my-app-qual
+  firebase-multi-env provision --mode projects --envs production:my-app-prod,qual:my-app-qual \\
+    --billing-account 01ABCD-EFGH12-IJKL34
   firebase-multi-env parity all --envs production:my-app-prod,qual:my-app-qual
   firebase-multi-env sync-users --emails you@email.com --envs qual:my-app-qual
 
@@ -57,6 +58,8 @@ Provision options:
   --mode databases|projects   Default databases (single project)
   --project <id>              Required for databases mode
   --envs <list>               databases: name or name:db-id; projects: name:projectId
+  --billing-account <id>      projects mode: link this billing account after create
+  --skip-create-project       projects mode: do not create projects (must already exist)
   --secrets <list>            databases mode secret bases (projects: from skeleton)
   --skeleton <path>           projects mode skeleton (default multi-env/skeleton.json)
   --location <region>         Default us-central1
@@ -253,6 +256,8 @@ function provision(args) {
       printOnly: opts.printOnly,
       targetRoot: process.cwd(),
       skeletonPath: opts.skeletonPath,
+      billingAccount: opts.billingAccount,
+      createProject: opts.createProject,
     });
 
     if (opts.printOnly) {

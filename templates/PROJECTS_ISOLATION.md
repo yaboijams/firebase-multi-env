@@ -18,9 +18,16 @@ Tradeoff: same email ≠ same UID across envs; testers sign in per Hosting site.
 npx firebase-multi-env init --mode projects
 # edit multi-env/skeleton.json (services, IAM role IDs, secret names, Auth providers)
 npx firebase-multi-env provision --mode projects \
-  --envs production:my-app-prod,qual:my-app-qual
+  --envs production:my-app-prod,qual:my-app-qual \
+  --billing-account YOUR_BILLING_ACCOUNT_ID
 bash multi-env/provision/projects/provision.all.sh
 ```
+
+Generated scripts **create** each Firebase/GCP project if it does not exist
+(`firebase projects:create`, with `gcloud projects create` fallback), link billing when
+`--billing-account` is set, then apply the skeleton. Re-runs are idempotent.
+
+Use `--skip-create-project` only when the projects already exist and you want IAM/secrets only.
 
 After changing the skeleton:
 
