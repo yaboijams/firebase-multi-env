@@ -4,76 +4,65 @@ Do **not** mount the same Stripe / SendGrid / partner secrets into every environ
 
 ## Pattern
 
-| Env | Runtime SA | Secrets |
-|---|---|---|
-| production | `fn-prod@...` | `STRIPE_SECRET_PROD`, `SENDGRID_PROD`, … |
-| qual | `fn-qual@...` | `STRIPE_SECRET_QUAL`, `SENDGRID_QUAL`, … |
+Logical name in code: `STRIPE_SECRET` via `defineSecret` / `createSecrets`.
+
+Secret Manager **resource** id (Firebase CLI prefixes with the codebase `prefix`):
+
+| Env | firebase.json `prefix` | Runtime SA | Secret Manager id |
+|---|---|---|---|
+| production | `prod` | `fn-prod@...` | `prod-STRIPE_SECRET` |
+| qual | `qual` | `fn-qual@...` | `qual-STRIPE_SECRET` |
+| cert | `cert` | `fn-cert@...` | `cert-STRIPE_SECRET` |
 
 Each secret’s IAM grants **accessor** only to that env’s SA.
 
-## Create secrets
+`npx firebase-multi-env provision` creates these resource ids. Helper:
+`secretResourceId('qual', 'STRIPE_SECRET')` → `qual-STRIPE_SECRET`.
+
+## Create / rotate a value
 
 ```bash
 PROJECT_ID=your-project-id
+SECRET_ID=qual-STRIPE_SECRET
 
-# Production
-printf '%s' "$STRIPE_LIVE" | gcloud secrets create STRIPE_SECRET_PROD \
+printf '%s' "$STRIPE_TEST" | gcloud secrets versions add "$SECRET_ID" \
   --project="$PROJECT_ID" --data-file=-
-
-# Qual (test keys)
-printf '%s' "$STRIPE_TEST" | gcloud secrets create STRIPE_SECRET_QUAL \
-  --project="$PROJECT_ID" --data-file=-
-
-gcloud secrets add-iam-policy-binding STRIPE_SECRET_PROD \
-  --project="$PROJECT_ID" \
-  --member="serviceAccount:fn-prod@$PROJECT_ID.iam.gserviceaccount.com" \
-  --role="roles/secretmanager.secretAccessor"
-
-gcloud secrets add-iam-policy-binding STRIPE_SECRET_QUAL \
-  --project="$PROJECT_ID" \
-  --member="serviceAccount:fn-qual@$PROJECT_ID.iam.gserviceaccount.com" \
-  --role="roles/secretmanager.secretAccessor"
+# (create first with provision scripts if the secret does not exist yet)
 ```
 
-Never grant `fn-qual` access to `*_PROD` secrets.
+Never grant `fn-qual` access to `prod-*` secrets (databases mode).
 
-## Wire in Functions (v2)
-
-When using firebase.json `prefix` (recommended), the CLI also prefixes secret **resource**
-names referenced by that codebase (`defineSecret('STRIPE_SECRET')` under `prefix: "qual"`
-expects Secret Manager secret `qual-STRIPE_SECRET`). Prefer either:
-
-1. **Same logical name + CLI prefix** — `defineSecret('STRIPE_SECRET')` + create `qual-STRIPE_SECRET` / `prod-STRIPE_SECRET`, or
-2. **Explicit env-suffixed names without relying on CLI prefix** — `defineSecret('STRIPE_SECRET_QUAL')` and create that exact secret (works if you avoid secret prefixing collisions carefully).
-
-Option 1 matches Firebase’s same-source multi-codebase model:
+## Wire in Functions (v2) — recommended
 
 ```ts
-import { defineSecret } from 'firebase-functions/params';
-import { onCall } from 'firebase-functions/v2/https';
+import { onRequest } from 'firebase-functions/v2/https';
+import { createSecrets } from 'firebase-multi-env/server';
 
-// Logical name; with firebase.json prefix "qual" the CLI binds qual-STRIPE_SECRET
-const stripeSecret = defineSecret('STRIPE_SECRET');
+const secrets = createSecrets([
+  // Local .env may use STRIPE_SECRET_KEY; cloud uses STRIPE_SECRET.
+  { name: 'STRIPE_SECRET', envKeys: ['STRIPE_SECRET_KEY'] },
+]);
 
-export const checkout = onCall(
+export const api = onRequest(
   {
     serviceAccount: `fn-qual@${process.env.GCLOUD_PROJECT}.iam.gserviceaccount.com`,
-    secrets: [stripeSecret],
+    secrets: secrets.params,
   },
-  withAppEnv(async () => {
-    const key = stripeSecret.value();
-    // ...
-  }),
+  async (req, res) => {
+    const key = secrets.require('STRIPE_SECRET');
+    res.json({ configured: Boolean(key) });
+  },
 );
 ```
 
-Create Secret Manager secrets as `qual-STRIPE_SECRET` / `prod-STRIPE_SECRET` (or keep
-explicit `*_QUAL` / `*_PROD` names if you are not using CLI secret prefixing).
+Locally, set `STRIPE_SECRET` (or an `envKeys` alias) in `functions/config/<env>/.env`.
+On Cloud, mount `secrets.params` so Firebase injects Secret Manager values.
 
 ## Checklist
 
-- [ ] Secret names are env-isolated (CLI-prefixed or env-suffixed)
+- [ ] Secret Manager ids match `${prefix}-${LOGICAL}` (not legacy `LOGICAL_QUAL`)
 - [ ] IAM bindings are per SA — no project-wide secretAccessor for runtime SAs
+- [ ] Functions pass `secrets: secrets.params` (or equivalent `defineSecret` list)
 - [ ] CI deployer can create/update secrets; runtime SAs only accessor
 - [ ] Per-env `configDir` / `.env` files are never copied into the wrong deploy
 - [ ] Client `prefixes` match firebase.json `prefix` values

@@ -16,12 +16,18 @@ import { onRequest } from 'firebase-functions/v2/https';
 import {
   createEnvRuntime,
   createGetDb,
+  createSecrets,
   requireAuth,
 } from 'firebase-multi-env/server';
 import { createWithAppEnvV2 } from 'firebase-multi-env/functions-v2';
 import { createWithAppEnvHttp } from 'firebase-multi-env/http';
 
 const projectId = process.env.GCLOUD_PROJECT ?? process.env.GCP_PROJECT;
+
+/** Mount on Cloud Functions; local reads STRIPE_SECRET / STRIPE_SECRET_KEY from .env. */
+const secrets = createSecrets([
+  { name: 'STRIPE_SECRET', envKeys: ['STRIPE_SECRET_KEY'] },
+]);
 
 export const appEnvRuntime = createEnvRuntime({
   pinned: true,
@@ -52,6 +58,7 @@ const qualSa = projectId
 export const syncData = onCall(
   {
     ...(qualSa ? { serviceAccount: qualSa } : {}),
+    secrets: secrets.params,
   },
   withAppEnv(async (request) => {
     const auth = requireAuth(request.auth);
@@ -60,6 +67,7 @@ export const syncData = onCall(
       uid: auth.uid,
       env: appEnvRuntime.getEnvTag(),
       // db.collection('...')
+      // stripe: secrets.get('STRIPE_SECRET')
     };
   }),
 );
@@ -67,11 +75,13 @@ export const syncData = onCall(
 export const api = onRequest(
   {
     ...(qualSa ? { serviceAccount: qualSa } : {}),
+    secrets: secrets.params,
   },
   withHttp(async (req, res) => {
     const db = getDb();
     res.json({
       env: appEnvRuntime.getEnvTag(),
+      stripeConfigured: Boolean(secrets.get('STRIPE_SECRET')),
       // use db as needed
     });
   }),
