@@ -25,6 +25,7 @@ export default defineConfig({
     'firebase-admin/auth',
     'firebase-admin/firestore',
     'firebase-functions',
+    'firebase-functions/params',
     'firebase-functions/v1/https',
     'firebase-functions/v2/https',
   ],

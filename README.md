@@ -22,7 +22,7 @@ Public imports:
 
 | Import | Purpose |
 |---|---|
-| `firebase-multi-env/server` | `createEnvRuntime`, `createGetDb`, `createGetDbForEnv`, guards |
+| `firebase-multi-env/server` | `createEnvRuntime`, `createGetDb`, `createGetDbForEnv`, `createSecrets`, guards |
 | `firebase-multi-env/functions-v1` | callable wrapper (v1) |
 | `firebase-multi-env/functions-v2` | callable wrapper (v2) |
 | `firebase-multi-env/http` | `onRequest` / Express-style wrapper |
@@ -109,6 +109,26 @@ export const getDbForEnv = createGetDbForEnv(appEnvRuntime);
 // in a scheduled job / script:
 const db = getDbForEnv('qual');
 ```
+
+### Secrets (Secret Manager)
+
+Provision creates `${prefix}-STRIPE_SECRET` (matches firebase.json `prefix` + `defineSecret`). Read them with:
+
+```ts
+import { createSecrets } from 'firebase-multi-env/server';
+import { onRequest } from 'firebase-functions/v2/https';
+
+const secrets = createSecrets([
+  { name: 'STRIPE_SECRET', envKeys: ['STRIPE_SECRET_KEY'] },
+]);
+
+export const api = onRequest({ secrets: secrets.params }, (req, res) => {
+  const key = secrets.require('STRIPE_SECRET');
+  res.json({ ok: Boolean(key) });
+});
+```
+
+Local: set `STRIPE_SECRET` (or an alias) in `functions/config/<env>/.env`. Cloud: mount `secrets.params`. Details: `templates/secrets-per-env.md`.
 
 Optional local hardening without pinning (not for Cloud deploys):
 
@@ -337,6 +357,7 @@ See `templates/PROVISION.md`. Scripts do not call GCP until you run them.
 - Optional HTTP ID token verification
 - Client callable + Firestore helpers (`prefixes` / `resolveFunctionId` for firebase.json `prefix`)
 - Server guards (`requireAuth`, `requireOwner`, `requireClaim`)
+- Secret Manager helpers (`createSecrets`, `secretResourceId`) — mount `secrets.params` on Functions; local `.env` aliases via `envKeys`
 - Rules templates (Firestore + Storage) + `init` / `doctor --strict`
 - ESLint plugin (`no-bare-admin-firestore`, `require-pinned-runtime`)
 - CLI grant/revoke for `allowedEnvs` (shared Auth + claims)

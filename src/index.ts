@@ -12,6 +12,13 @@ export type {
 export { createEnvRuntime, type EnvRuntime, parseOriginHeader } from './core/runtime.js';
 export { createGetDb, createGetDbForEnv } from './server/getDb.js';
 export { requireAuth, requireOwner, requireClaim } from './server/guards.js';
+export {
+  createSecrets,
+  functionPrefixForEnv,
+  secretResourceId,
+  type SecretSpec,
+  type SecretsBundle,
+} from './server/secrets.js';
 export { createWithAppEnvV1 } from './functions/v1.js';
 export { createWithAppEnvV2 } from './functions/v2.js';
 export {

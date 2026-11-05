@@ -44,6 +44,30 @@ export function secretSuffixForEnv(envName) {
 }
 
 /**
+ * firebase.json codebase `prefix` for an env (`production` → `prod`).
+ * Secret Manager ids for `defineSecret('NAME')` are `${prefix}-NAME`.
+ * @param {string} envName
+ * @returns {string}
+ */
+export function functionPrefixForEnv(envName) {
+  const lower = envName.trim().toLowerCase();
+  if (lower === 'production' || lower === 'prod') {
+    return 'prod';
+  }
+  return lower.replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-') || 'env';
+}
+
+/**
+ * Secret Manager resource id aligned with Firebase CLI secret prefixing.
+ * @param {string} envName
+ * @param {string} logicalName
+ * @returns {string}
+ */
+export function secretResourceId(envName, logicalName) {
+  return `${functionPrefixForEnv(envName)}-${logicalName}`;
+}
+
+/**
  * @param {string} envName
  * @param {string} projectId
  * @param {string} [explicitDatabase]
@@ -232,9 +256,10 @@ export function renderEnvScript({
   ];
 
   for (const base of secretBases) {
-    const secretId = `${base}_${env.secretSuffix}`;
+    const secretId = secretResourceId(env.name, base);
     lines.push(
       `echo "==> Secret Manager placeholder ${secretId}"`,
+      `echo "    (defineSecret('${base}') + firebase.json prefix → this resource id)"`,
       `SECRET_ID="${secretId}"`,
       'if gcloud secrets describe "${SECRET_ID}" --project="${PROJECT_ID}" >/dev/null 2>&1; then',
       '  echo "    (exists)"',
@@ -261,7 +286,7 @@ export function renderEnvScript({
     for (const other of otherEnvs) {
       for (const base of secretBases) {
         lines.push(
-          `echo "    Do NOT grant ${saEmail} access to ${base}_${other.secretSuffix}"`,
+          `echo "    Do NOT grant ${saEmail} access to ${secretResourceId(other.name, base)}"`,
         );
       }
       lines.push(`echo "    Do NOT grant ${saEmail} objectAdmin on gs://${other.bucket}"`);
@@ -695,9 +720,10 @@ export function renderProjectEnvScript({
   }
 
   for (const base of secretBases) {
-    const secretId = `${base}_${env.secretSuffix}`;
+    const secretId = secretResourceId(env.name, base);
     lines.push(
       `SECRET_ID="${secretId}"`,
+      `echo "Secret ${secretId} (defineSecret('${base}') + prefix ${functionPrefixForEnv(env.name)})"`,
       'if gcloud secrets describe "${SECRET_ID}" --project="${PROJECT_ID}" >/dev/null 2>&1; then',
       '  echo "Secret ${SECRET_ID} already exists"',
       'else',

@@ -10,6 +10,7 @@ import {
   parseProvisionArgs,
   parseSecrets,
   saIdForEnv,
+  secretResourceId,
   secretSuffixForEnv,
 } from '../../bin/lib/provision.mjs';
 
@@ -20,6 +21,7 @@ describe('provision helpers', () => {
     expect(databaseForEnv('production', 'my-app')).toBe('(default)');
     expect(bucketForEnv('production', 'my-app')).toBe('my-app-prod');
     expect(secretSuffixForEnv('production')).toBe('PROD');
+    expect(secretResourceId('production', 'STRIPE_SECRET')).toBe('prod-STRIPE_SECRET');
   });
 
   it('maps gated envs to slug SA / db / bucket', () => {
@@ -27,6 +29,7 @@ describe('provision helpers', () => {
     expect(databaseForEnv('qual', 'my-app')).toBe('qual-env');
     expect(bucketForEnv('qual', 'my-app')).toBe('my-app-qual');
     expect(secretSuffixForEnv('qual')).toBe('QUAL');
+    expect(secretResourceId('qual', 'STRIPE_SECRET')).toBe('qual-STRIPE_SECRET');
   });
 
   it('parses env list with optional database overrides', () => {
@@ -108,18 +111,18 @@ describe('buildProvisionFiles', () => {
     expect(qual).toContain('gcloud iam service-accounts create');
     expect(qual).toContain('BUCKET="my-app-qual"');
     expect(qual).toContain('gs://${BUCKET}');
-    expect(qual).toContain('STRIPE_SECRET_QUAL');
-    expect(qual).toContain('SENDGRID_QUAL');
+    expect(qual).toContain('qual-STRIPE_SECRET');
+    expect(qual).toContain('qual-SENDGRID');
     expect(qual).toContain('roles/datastore.user');
     expect(qual).toContain('roles/storage.objectAdmin');
     expect(qual).toContain('Do NOT grant');
-    expect(qual).toContain('STRIPE_SECRET_PROD');
+    expect(qual).toContain('prod-STRIPE_SECRET');
     expect(qual).toContain('gs://my-app-prod');
 
     const prod = readFileSync(join(outDir, 'provision.production.sh'), 'utf8');
     expect(prod).toContain('(default)');
     expect(prod).toContain('fn-prod@');
-    expect(prod).toContain('STRIPE_SECRET_PROD');
+    expect(prod).toContain('prod-STRIPE_SECRET');
 
     const all = readFileSync(join(outDir, 'provision.all.sh'), 'utf8');
     expect(all).toContain('provision.production.sh');
